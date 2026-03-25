@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { aiDecisionSchema, generateLocalFallbackDecision, type AgentPromptPayload } from "@/lib/ai";
+import { aiDecisionMapSchema, aiDecisionSchema, generateLocalFallbackDecision, generateLocalFallbackDecisionMap, type AgentPromptPayload, type BatchAgentPromptPayload } from "@/lib/ai";
 
 const ALLOWED_LOCATIONS = new Set([
   "shrine",
@@ -77,6 +77,14 @@ function normalizeDecisionShape(raw: unknown) {
   return candidate;
 }
 
+function normalizeDecisionMapShape(raw: unknown) {
+  if (!raw || typeof raw !== "object") return raw;
+
+  return Object.fromEntries(
+    Object.entries(raw as Record<string, unknown>).map(([agentId, decision]) => [agentId, normalizeDecisionShape(decision)]),
+  );
+}
+
 async function requestMistralDecision(payload: AgentPromptPayload) {
   const apiKey = process.env.MISTRAL_API_KEY;
 
@@ -89,6 +97,8 @@ async function requestMistralDecision(payload: AgentPromptPayload) {
     "Choose one grounded action.",
     "Return strict JSON only.",
     "Do not invent locations outside the allowed schema.",
+    "If action is speak, write a fresh in-character line for this exact moment instead of a generic or repeated line.",
+    "Do not repeat recent lines already present in the payload unless absolutely necessary.",
     "Keep messages short and in-character.",
     "Use Hinglish or English.",
     "Conflict, friendship, insults, gossip, and alliances are welcome, but avoid slurs about protected traits.",
@@ -121,6 +131,52 @@ async function requestMistralDecision(payload: AgentPromptPayload) {
   return json?.choices?.[0]?.message?.content;
 }
 
+async function requestMistralDecisionBatch(payload: BatchAgentPromptPayload) {
+  const apiKey = process.env.MISTRAL_API_KEY;
+
+  if (!apiKey) {
+    throw new Error("Missing MISTRAL_API_KEY for ai mode.");
+  }
+
+  const system = [
+    "You are controlling multiple autonomous characters in a chaotic social village sim.",
+    "Return one grounded decision per character.",
+    "Return strict JSON only as an object keyed by agent id.",
+    "Do not invent locations outside the allowed schema.",
+    "If an action is speak, write a fresh in-character line for that exact moment instead of a generic or repeated line.",
+    "Do not repeat recent lines already present in the payload unless absolutely necessary.",
+    "Keep messages short and in-character.",
+    "Use Hinglish or English.",
+    "Conflict, friendship, insults, gossip, and alliances are welcome, but avoid slurs about protected traits.",
+    'Each value must match this shape: {"action":"walk|speak|gather|reflect|rest|wait","targetLocationId":"optional_allowed_location","message":"optional_short_line","thought":"required_short_thought"}.',
+  ].join(" ");
+
+  const response = await fetch("https://api.mistral.ai/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: process.env.MISTRAL_MODEL ?? "mistral-small-latest",
+      temperature: 0.8,
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: JSON.stringify(payload) },
+      ],
+    }),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || "Mistral batch request failed.");
+  }
+
+  const json = await response.json();
+  return json?.choices?.[0]?.message?.content;
+}
+
 async function requestGeminiDecision(payload: AgentPromptPayload) {
   const apiKey = process.env.GEMINI_API_KEY;
 
@@ -134,6 +190,8 @@ async function requestGeminiDecision(payload: AgentPromptPayload) {
     "Choose one grounded action.",
     "Return strict JSON only.",
     "Do not invent locations outside the allowed schema.",
+    "If action is speak, write a fresh in-character line for this exact moment instead of a generic or repeated line.",
+    "Do not repeat recent lines already present in the payload unless absolutely necessary.",
     "Keep messages short and in-character.",
     "Use Hinglish or English.",
     "Conflict, friendship, insults, gossip, and alliances are welcome, but avoid slurs about protected traits.",
@@ -174,30 +232,112 @@ async function requestGeminiDecision(payload: AgentPromptPayload) {
   return json?.candidates?.[0]?.content?.parts?.[0]?.text;
 }
 
-export async function POST(request: Request) {
-  const payload = (await request.json()) as AgentPromptPayload;
+async function requestGeminiDecisionBatch(payload: BatchAgentPromptPayload) {
+  const apiKey = process.env.GEMINI_API_KEY;
 
-  const mode = process.env.AGENT_MODE ?? "local";
+  if (!apiKey) {
+    throw new Error("Missing GEMINI_API_KEY for ai mode.");
+  }
+
+  const model = process.env.GEMINI_MODEL ?? "gemini-2.5-flash";
+  const system = [
+    "You are controlling multiple autonomous characters in a chaotic social village sim.",
+    "Return one grounded decision per character.",
+    "Return strict JSON only as an object keyed by agent id.",
+    "Do not invent locations outside the allowed schema.",
+    "If an action is speak, write a fresh in-character line for that exact moment instead of a generic or repeated line.",
+    "Do not repeat recent lines already present in the payload unless absolutely necessary.",
+    "Keep messages short and in-character.",
+    "Use Hinglish or English.",
+    "Conflict, friendship, insults, gossip, and alliances are welcome, but avoid slurs about protected traits.",
+    'Each value must match this shape: {"action":"walk|speak|gather|reflect|rest|wait","targetLocationId":"optional_allowed_location","message":"optional_short_line","thought":"required_short_thought"}.',
+  ].join(" ");
+
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        generationConfig: {
+          temperature: 0.8,
+          responseMimeType: "application/json",
+        },
+        systemInstruction: {
+          parts: [{ text: system }],
+        },
+        contents: [
+          {
+            role: "user",
+            parts: [{ text: JSON.stringify(payload) }],
+          },
+        ],
+      }),
+    },
+  );
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || "Gemini batch request failed.");
+  }
+
+  const json = await response.json();
+  return json?.candidates?.[0]?.content?.parts?.[0]?.text;
+}
+
+export async function POST(request: Request) {
+  const payload = (await request.json()) as AgentPromptPayload | BatchAgentPromptPayload;
+
+  const hasAiProviderKey = Boolean(process.env.MISTRAL_API_KEY || process.env.GEMINI_API_KEY);
+  const mode = process.env.AGENT_MODE ?? (hasAiProviderKey ? "ai" : "local");
+
+  const isBatch = Array.isArray((payload as BatchAgentPromptPayload).agents);
 
   if (mode !== "ai") {
-    const decision = await generateLocalFallbackDecision(payload);
+    if (isBatch) {
+      const decisions = await generateLocalFallbackDecisionMap((payload as BatchAgentPromptPayload).agents);
+      return NextResponse.json({ mode: "local", decisions: Object.fromEntries(decisions) });
+    }
+
+    const decision = await generateLocalFallbackDecision(payload as AgentPromptPayload);
     return NextResponse.json({ mode: "local", decision });
   }
 
   try {
     const provider = process.env.AI_PROVIDER ?? "mistral";
-    const content = provider === "gemini" ? await requestGeminiDecision(payload) : await requestMistralDecision(payload);
+    if (isBatch) {
+      const batchPayload = payload as BatchAgentPromptPayload;
+      const content = provider === "gemini" ? await requestGeminiDecisionBatch(batchPayload) : await requestMistralDecisionBatch(batchPayload);
+      const parsedContent = normalizeDecisionMapShape(typeof content === "string" ? JSON.parse(extractJsonObject(content)) : content);
+      const parsed = aiDecisionMapSchema.safeParse(parsedContent);
+
+      if (!parsed.success) {
+        const decisions = await generateLocalFallbackDecisionMap(batchPayload.agents);
+        return NextResponse.json({ mode: "fallback", provider, error: "Invalid AI decision map shape", decisions: Object.fromEntries(decisions) });
+      }
+
+      return NextResponse.json({ mode: "ai", provider, decisions: parsed.data });
+    }
+
+    const content = provider === "gemini" ? await requestGeminiDecision(payload as AgentPromptPayload) : await requestMistralDecision(payload as AgentPromptPayload);
     const parsedContent = normalizeDecisionShape(typeof content === "string" ? JSON.parse(extractJsonObject(content)) : content);
     const parsed = aiDecisionSchema.safeParse(parsedContent);
 
     if (!parsed.success) {
-      const decision = await generateLocalFallbackDecision(payload);
+      const decision = await generateLocalFallbackDecision(payload as AgentPromptPayload);
       return NextResponse.json({ mode: "fallback", provider, error: "Invalid AI decision shape", decision });
     }
 
     return NextResponse.json({ mode: "ai", provider, decision: parsed.data });
   } catch (error) {
-    const decision = await generateLocalFallbackDecision(payload);
+    if (isBatch) {
+      const decisions = await generateLocalFallbackDecisionMap((payload as BatchAgentPromptPayload).agents);
+      return NextResponse.json({ mode: "fallback", error: error instanceof Error ? error.message : "AI batch decision request failed.", decisions: Object.fromEntries(decisions) });
+    }
+
+    const decision = await generateLocalFallbackDecision(payload as AgentPromptPayload);
     return NextResponse.json({ mode: "fallback", error: error instanceof Error ? error.message : "AI decision request failed.", decision });
   }
 }

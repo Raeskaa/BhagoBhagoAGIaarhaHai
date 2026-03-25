@@ -926,3 +926,259 @@ button {
     margin-top: 4px;
   }
 }
+
+.game-shell-fullscreen {
+  min-height: 100vh;
+  height: 100vh;
+  position: relative;
+  overflow: hidden;
+}
+
+.full-stage {
+  min-height: 100vh;
+  grid-template-rows: minmax(0, 1fr);
+  gap: 0;
+}
+
+.full-canvas-wrap {
+  min-height: 100vh;
+  height: 100vh;
+  padding: 18px;
+  border: 0;
+  border-radius: 0;
+}
+
+.floating-hud {
+  position: absolute;
+  z-index: 5;
+}
+
+.top-left-hud {
+  top: 18px;
+  left: 18px;
+}
+
+.bottom-left-hud {
+  left: 18px;
+  bottom: 18px;
+}
+
+.overlay-toggle-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.ai-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--panel-line);
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(16px);
+  color: var(--text);
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.ai-status-badge.ai {
+  border-color: rgba(45, 125, 107, 0.34);
+  background: linear-gradient(180deg, rgba(228, 246, 240, 0.96), rgba(248, 253, 251, 0.9));
+}
+
+.ai-status-badge.fallback {
+  border-color: rgba(191, 112, 35, 0.3);
+  background: linear-gradient(180deg, rgba(255, 244, 224, 0.96), rgba(255, 250, 242, 0.92));
+}
+
+.ai-status-badge.local,
+.ai-status-badge.unknown {
+  border-color: rgba(91, 111, 133, 0.24);
+  background: linear-gradient(180deg, rgba(241, 246, 250, 0.96), rgba(249, 251, 253, 0.9));
+}
+
+.ai-status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: #7f8b96;
+  flex: 0 0 auto;
+}
+
+.ai-status-badge.ai .ai-status-dot {
+  background: #29936b;
+}
+
+.ai-status-badge.fallback .ai-status-dot {
+  background: #d3872c;
+}
+
+.overlay-toggle {
+  padding: 12px 16px;
+  border-radius: 999px;
+  border: 1px solid var(--panel-line);
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(16px);
+  cursor: pointer;
+}
+
+.overlay-toggle.active {
+  background: linear-gradient(180deg, rgba(228, 246, 240, 0.96), rgba(248, 253, 251, 0.9));
+  border-color: rgba(45, 125, 107, 0.34);
+}
+
+.overlay-panel {
+  position: absolute;
+  top: 18px;
+  bottom: 18px;
+  z-index: 8;
+  width: min(480px, calc(100vw - 36px));
+  padding: 18px;
+  border: 1px solid var(--panel-line);
+  border-radius: 28px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(248, 251, 252, 0.84));
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(20px);
+  overflow: auto;
+  opacity: 0;
+  pointer-events: none;
+  transition: transform 220ms ease, opacity 220ms ease;
+}
+
+.overlay-left {
+  left: 18px;
+  transform: translateX(-105%);
+}
+
+.overlay-right {
+  right: 18px;
+  transform: translateX(105%);
+}
+
+.overlay-top {
+  top: 18px;
+  left: 50%;
+  right: auto;
+  bottom: auto;
+  width: min(1320px, calc(100vw - 36px));
+  max-height: min(320px, calc(100vh - 36px));
+  transform: translate(-50%, -112%);
+}
+
+.overlay-panel.open {
+  transform: translateX(0);
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.overlay-top.open {
+  transform: translate(-50%, 0);
+}
+
+.overlay-panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.overlay-title {
+  margin-top: 6px;
+  color: var(--text);
+  font-size: 0.96rem;
+  font-weight: 700;
+}
+
+.game-shell-fullscreen .world-header {
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  align-items: stretch;
+  padding: 0;
+  border-radius: 0;
+  border: 0;
+  box-shadow: none;
+  backdrop-filter: none;
+  background: transparent;
+}
+
+.game-shell-fullscreen .world-header .metric-pill {
+  min-height: 84px;
+}
+
+.metric-pill-compact .metric-value {
+  text-transform: lowercase;
+}
+
+.game-shell-fullscreen .game-canvas-shell {
+  max-width: 1500px;
+}
+
+.game-shell-fullscreen .game-canvas-shell canvas {
+  width: min(100%, 1500px);
+  max-height: calc(100vh - 36px);
+}
+
+@media (max-width: 1200px) {
+  .game-shell-fullscreen .world-header {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .top-left-hud,
+  .bottom-left-hud {
+    left: 12px;
+    right: 12px;
+    width: auto;
+    transform: none;
+  }
+
+  .bottom-left-hud {
+    bottom: 12px;
+  }
+
+  .overlay-panel,
+  .game-shell-fullscreen .world-header {
+    border-radius: 22px;
+  }
+
+  .overlay-panel-header {
+    display: grid;
+  }
+
+  .overlay-panel {
+    top: 12px;
+    bottom: 12px;
+    left: 12px;
+    right: 12px;
+    width: auto;
+  }
+
+  .overlay-left,
+  .overlay-right {
+    transform: translateY(104%);
+  }
+
+  .overlay-top {
+    top: 12px;
+    left: 12px;
+    right: 12px;
+    bottom: auto;
+    width: auto;
+    max-height: calc(100vh - 24px);
+    transform: translateY(-104%);
+  }
+
+  .overlay-panel.open {
+    transform: translateY(0);
+  }
+
+  .game-shell-fullscreen .world-header {
+    grid-template-columns: 1fr 1fr;
+  }
+}

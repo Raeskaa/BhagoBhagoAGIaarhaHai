@@ -6,7 +6,7 @@ import { AgentPanel } from "@/components/panels/AgentPanel";
 import { EventFeed } from "@/components/panels/EventFeed";
 import { WorldHeader } from "@/components/panels/WorldHeader";
 import { createInitialSnapshot, tickSimulation, tickSimulationWithDecisions } from "@/lib/sim";
-import type { AgentPromptPayload } from "@/lib/ai";
+import type { AIDecision, AgentPromptPayload } from "@/lib/ai";
 import type { AgentId, VillageSummary, WorldSnapshot } from "@/lib/types";
 
 const GameCanvas = dynamic(() => import("@/components/game/GameCanvas").then((mod) => mod.GameCanvas), {
@@ -73,8 +73,13 @@ export function PlaygroundClient() {
   });
   const [selectedAgentId, setSelectedAgentId] = useState<AgentId | null>(null);
   const [simulationMode] = useState<"local" | "ai-ready">("ai-ready");
-  const [leftPanelWidth, setLeftPanelWidth] = useState(460);
-  const [isResizing, setIsResizing] = useState(false);
+  const [aiStatus, setAiStatus] = useState<{ mode: "ai" | "fallback" | "local" | "unknown"; note: string }>({
+    mode: "unknown",
+    note: "checking",
+  });
+  const [chatOpen, setChatOpen] = useState(false);
+  const [peopleOpen, setPeopleOpen] = useState(false);
+  const [hudOpen, setHudOpen] = useState(false);
   const snapshotRef = useRef(snapshot);
 
   snapshotRef.current = snapshot;
@@ -95,24 +100,40 @@ export function PlaygroundClient() {
     let cancelled = false;
     let timer: number | undefined;
 
-    async function requestDecision(payload: AgentPromptPayload) {
+    async function requestDecisionBatch(payloads: AgentPromptPayload[]) {
       const response = await fetch("/api/ai", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          snapshot: payloads[0]?.snapshot,
+          agents: payloads,
+        }),
       });
 
       if (!response.ok) {
-        throw new Error("AI decision request failed.");
+        throw new Error("AI decision batch request failed.");
       }
 
       const json = await response.json();
-      if (!json?.decision) {
-        throw new Error("AI decision missing in response.");
+      if (!json?.decisions || typeof json.decisions !== "object") {
+        throw new Error("AI decision map missing in response.");
       }
-      return json.decision;
+
+      const mode = json?.mode === "ai" || json?.mode === "fallback" || json?.mode === "local" ? json.mode : "unknown";
+      const note =
+        mode === "ai"
+          ? json?.provider ? `${json.provider} live` : "live"
+          : mode === "fallback"
+            ? json?.error ? `fallback: ${String(json.error).slice(0, 48)}` : "fallback active"
+            : mode === "local"
+              ? "local mode"
+              : "unknown";
+
+      setAiStatus({ mode, note });
+
+      return new Map<AgentId, AIDecision>(Object.entries(json.decisions) as Array<[AgentId, AIDecision]>);
     }
 
     let aiFailureCount = 0;
@@ -121,14 +142,18 @@ export function PlaygroundClient() {
       if (cancelled) return;
 
       try {
-        const nextSnapshot = await tickSimulationWithDecisions(snapshotRef.current, requestDecision);
+          const nextSnapshot = await tickSimulationWithDecisions(snapshotRef.current, requestDecisionBatch);
         aiFailureCount = 0;
         if (!cancelled) {
           snapshotRef.current = nextSnapshot;
           setSnapshot(nextSnapshot);
         }
-      } catch {
+      } catch (error) {
         aiFailureCount += 1;
+        setAiStatus({
+          mode: "fallback",
+          note: error instanceof Error ? `request failed: ${error.message.slice(0, 40)}` : "request failed",
+        });
         const nextSnapshot = tickSimulation(snapshotRef.current);
         if (!cancelled) {
           snapshotRef.current = nextSnapshot;
@@ -151,79 +176,92 @@ export function PlaygroundClient() {
     };
   }, []);
 
-  useEffect(() => {
-    if (!isResizing) return;
-
-    function handlePointerMove(event: PointerEvent) {
-      const nextWidth = Math.min(Math.max(event.clientX - 18, 360), 760);
-      setLeftPanelWidth(nextWidth);
-    }
-
-    function handlePointerUp() {
-      setIsResizing(false);
-    }
-
-    window.addEventListener("pointermove", handlePointerMove);
-    window.addEventListener("pointerup", handlePointerUp);
-
-    return () => {
-      window.removeEventListener("pointermove", handlePointerMove);
-      window.removeEventListener("pointerup", handlePointerUp);
-    };
-  }, [isResizing]);
-
   const selectedAgent = useMemo(
     () => (selectedAgentId ? snapshot.agents.find((agent) => agent.id === selectedAgentId) ?? null : null),
     [selectedAgentId, snapshot.agents],
   );
   const focusedAgentId = selectedAgentId ?? snapshot.agents[0]?.id;
-  const shellStyle = {
-    "--left-panel-width": `${leftPanelWidth}px`,
-  } as CSSProperties;
+  const shellStyle = {} as CSSProperties;
+
+  function handleSelectAgent(agentId: AgentId | null) {
+    setSelectedAgentId(agentId);
+    if (agentId) {
+      setPeopleOpen(true);
+    }
+  }
 
   return (
-    <main className={`app-shell ${isResizing ? "is-resizing" : ""}`} style={shellStyle}>
-      <aside className="sidebar sidebar-left">
-        <div className="sidebar-header">
-          <div>
-            <div className="eyebrow">Autonomous Chaos Sandbox</div>
-            <h1>Five at the Fire</h1>
+    <main className="game-shell-fullscreen" style={shellStyle}>
+      <section className="main-stage full-stage">
+        <div className="floating-hud bottom-left-hud">
+          <div className="overlay-toggle-row">
+            <div className={`ai-status-badge ${aiStatus.mode}`} title={aiStatus.note}>
+              <span className="ai-status-dot" />
+              <span>{aiStatus.mode === "ai" ? "AI Live" : aiStatus.mode === "fallback" ? "AI Fallback" : aiStatus.mode === "local" ? "Local" : "Checking"}</span>
+            </div>
+            <button className={`overlay-toggle ${hudOpen ? "active" : ""}`} onClick={() => setHudOpen((open) => !open)} type="button">
+              Stats
+            </button>
+            <button className={`overlay-toggle ${chatOpen ? "active" : ""}`} onClick={() => setChatOpen((open) => !open)} type="button">
+              Chat
+            </button>
+            <button className={`overlay-toggle ${peopleOpen ? "active" : ""}`} onClick={() => setPeopleOpen((open) => !open)} type="button">
+              People
+            </button>
           </div>
-          <div className="topline-note">{simulationMode} / live rooms / observer view</div>
+        </div>
+
+        <div className="stage-canvas-wrap full-canvas-wrap">
+          <GameCanvas snapshot={snapshot} selectedAgentId={focusedAgentId} onSelectAgent={handleSelectAgent} />
+        </div>
+      </section>
+
+      <aside className={`overlay-panel overlay-top ${hudOpen ? "open" : ""}`}>
+        <div className="overlay-panel-header">
+          <div>
+            <div className="hud-label">Village Stats</div>
+            <div className="overlay-title">Cycle, mood, market, and survival state</div>
+          </div>
+          <button className="close-button" onClick={() => setHudOpen(false)} type="button">
+            close
+          </button>
+        </div>
+
+        <WorldHeader snapshot={snapshot} />
+      </aside>
+
+      <aside className={`overlay-panel overlay-left ${chatOpen ? "open" : ""}`}>
+        <div className="overlay-panel-header">
+          <div>
+            <div className="hud-label">Village Chat</div>
+            <div className="overlay-title">Live rooms and scene log</div>
+          </div>
+          <button className="close-button" onClick={() => setChatOpen(false)} type="button">
+            close
+          </button>
         </div>
 
         <EventFeed threads={snapshot.chatThreads} />
       </aside>
 
-      <div
-        aria-label="Resize chat panel"
-        className="panel-resizer"
-        onPointerDown={() => setIsResizing(true)}
-        role="separator"
-      />
-
-      <section className="main-stage">
-        <div className="stage-topbar">
-          <WorldHeader snapshot={snapshot} />
+      <aside className={`overlay-panel overlay-right ${peopleOpen ? "open" : ""}`}>
+        <div className="overlay-panel-header">
+          <div>
+            <div className="hud-label">People</div>
+            <div className="overlay-title">Status, factions, and survival watch</div>
+          </div>
+          <button className="close-button" onClick={() => setPeopleOpen(false)} type="button">
+            close
+          </button>
         </div>
 
-        <div className="stage-canvas-wrap">
-          <GameCanvas
-            snapshot={snapshot}
-            selectedAgentId={focusedAgentId}
-            onSelectAgent={setSelectedAgentId}
-          />
-        </div>
-      </section>
-
-      <aside className="sidebar sidebar-right">
         <AgentPanel
           agents={snapshot.agents}
           threads={snapshot.chatThreads}
           recentEvents={snapshot.recentEvents}
           villageSummary={villageSummary}
           selectedAgentId={selectedAgent?.id ?? null}
-          onSelectAgent={setSelectedAgentId}
+          onSelectAgent={handleSelectAgent}
           selectedAgent={selectedAgent}
         />
       </aside>

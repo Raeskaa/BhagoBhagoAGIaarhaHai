@@ -56,6 +56,10 @@ export function WorldHeader({ snapshot }: { snapshot: WorldSnapshot }) {
         <div className="metric-label">Market</div>
         <div className="metric-value">food {foodPrice} / goods {goodsPrice} / scraps {scrapsPrice} / med {medicinePrice}</div>
       </div>
+      <div className="metric-pill metric-pill-compact">
+        <div className="metric-label">Mode</div>
+        <div className="metric-value">observer / live sim</div>
+      </div>
     </div>
   );
 }

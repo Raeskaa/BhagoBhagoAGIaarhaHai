@@ -195,6 +195,10 @@ export function createVillageScene(deps: SceneDeps) {
         bundle.body.setFlipX(facing === "left");
         this.setAnimation(bundle, agent.id, isMoving ? "walk" : "idle");
 
+        this.tweens.killTweensOf(bundle.body);
+        this.tweens.killTweensOf(bundle.glow);
+        this.tweens.killTweensOf(bundle.label);
+
         this.tweens.add({
           targets: bundle.body,
           x: point.x,
@@ -204,16 +208,8 @@ export function createVillageScene(deps: SceneDeps) {
         });
         this.tweens.add({ targets: bundle.glow, x: point.x, y: point.y, duration: 720, ease: "Sine.Out" });
         this.tweens.add({ targets: bundle.label, x: point.x, y: point.y + 24, duration: 720, ease: "Sine.Out" });
-
         bundle.bobTween?.stop();
-        bundle.bobTween = this.tweens.add({
-          targets: bundle.body,
-          y: point.y - 2,
-          duration: agent.id === "hammer" ? 1000 : 1350,
-          yoyo: true,
-          repeat: -1,
-          ease: "Sine.InOut",
-        });
+        bundle.bobTween = undefined;
 
         bundle.glow.setFillStyle(moodTint(agent.mood), agent.id === nextSelectedAgentId ? 0.28 : 0.14);
         bundle.label.setText(agent.name.replace("The ", ""));

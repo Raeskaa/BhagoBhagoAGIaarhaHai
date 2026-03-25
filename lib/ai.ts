@@ -27,6 +27,8 @@ export const aiDecisionSchema = z.object({
 
 export type AIDecision = z.infer<typeof aiDecisionSchema>;
 
+export const aiDecisionMapSchema = z.record(z.string(), aiDecisionSchema);
+
 export interface AgentPromptPayload {
   snapshot: Pick<WorldSnapshot, "world">;
   self: {
@@ -37,6 +39,7 @@ export interface AgentPromptPayload {
     currentLocationId: LocationId;
     currentGoal: string;
     lastThought: string;
+    sceneFocus: string;
     life: number;
     energy: number;
     money: number;
@@ -44,9 +47,15 @@ export interface AgentPromptPayload {
     inventory: Record<string, number>;
     relationships: Record<string, number>;
     needs: Record<string, number>;
+    recentLines: string[];
   };
   recentEvents: Array<Pick<SimEvent, "type" | "summary" | "locationId">>;
   thread: Pick<ChatThread, "title" | "locationId" | "memberIds" | "messages"> | null;
+}
+
+export interface BatchAgentPromptPayload {
+  snapshot: Pick<WorldSnapshot, "world">;
+  agents: AgentPromptPayload[];
 }
 
 export function createAgentPromptPayload(snapshot: WorldSnapshot, agent: AgentState, thread: ChatThread | null): AgentPromptPayload {
@@ -62,6 +71,7 @@ export function createAgentPromptPayload(snapshot: WorldSnapshot, agent: AgentSt
       currentLocationId: agent.currentLocationId,
       currentGoal: agent.currentGoal,
       lastThought: agent.lastThought,
+      sceneFocus: agent.sceneFocus,
       life: agent.life,
       energy: agent.energy,
       money: agent.money,
@@ -69,6 +79,7 @@ export function createAgentPromptPayload(snapshot: WorldSnapshot, agent: AgentSt
       inventory: { ...agent.inventory },
       relationships: { ...agent.relationships },
       needs: { ...agent.needs },
+      recentLines: [...agent.recentLines],
     },
     recentEvents: snapshot.recentEvents.slice(0, 4).map((event) => ({
       type: event.type,
@@ -100,7 +111,7 @@ export async function generateLocalFallbackDecision(payload: AgentPromptPayload)
   if (topNeed === "social" && payload.thread && payload.thread.memberIds.length > 1) {
     return {
       action: "speak",
-      message: `${payload.self.name} jumps in: enough bakchodi, my turn now.`,
+      message: undefined,
       thought: `${payload.self.name} wants to grab the thread before someone else hijacks it.`,
     };
   }
@@ -110,4 +121,9 @@ export async function generateLocalFallbackDecision(payload: AgentPromptPayload)
     targetLocationId: "square",
     thought: `${payload.self.name} keeps moving, scanning for drama, allies, and weak spots.`,
   };
+}
+
+export async function generateLocalFallbackDecisionMap(payloads: AgentPromptPayload[]) {
+  const entries = await Promise.all(payloads.map(async (payload) => [payload.self.id, await generateLocalFallbackDecision(payload)] as const));
+  return new Map(entries);
 }

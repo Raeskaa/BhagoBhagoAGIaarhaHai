@@ -14,9 +14,11 @@ export function GameCanvas({ snapshot, selectedAgentId, onSelectAgent }: GameCan
   const gameRef = useRef<{ destroy: (removeCanvas: boolean, noReturn?: boolean) => void; scene: { getScene: (key: string) => unknown } } | null>(null);
   const snapshotRef = useRef(snapshot);
   const selectedAgentRef = useRef(selectedAgentId);
+  const onSelectAgentRef = useRef(onSelectAgent);
 
   snapshotRef.current = snapshot;
   selectedAgentRef.current = selectedAgentId;
+  onSelectAgentRef.current = onSelectAgent;
 
   useEffect(() => {
     let mounted = true;
@@ -40,9 +42,12 @@ export function GameCanvas({ snapshot, selectedAgentId, onSelectAgent }: GameCan
           createVillageScene({
             getSnapshot: () => snapshotRef.current,
             getSelectedAgentId: () => selectedAgentRef.current,
-            onSelectAgent,
+            onSelectAgent: (agentId) => onSelectAgentRef.current(agentId),
           }),
         ],
+        audio: {
+          noAudio: true,
+        },
         render: {
           antialias: false,
           pixelArt: true,
@@ -65,7 +70,7 @@ export function GameCanvas({ snapshot, selectedAgentId, onSelectAgent }: GameCan
         gameRef.current = null;
       }
     };
-  }, [onSelectAgent]);
+  }, []);
 
   useEffect(() => {
     const scene = gameRef.current?.scene.getScene("village-scene") as

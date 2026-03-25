@@ -1,6 +1,6 @@
 import { baseMapRows, locationPositions } from "@/lib/constants/map";
-import { createAgentPromptPayload, generateLocalFallbackDecision, type AIDecision } from "@/lib/ai";
-import type { AgentId, AgentNeeds, AgentState, ChatMessage, ChatThread, EmotionTone, LocationId, Position, SimEvent, WorldPickup, WorldSnapshot } from "@/lib/types";
+import { createAgentPromptPayload, generateLocalFallbackDecisionMap, type AIDecision, type AgentPromptPayload } from "@/lib/ai";
+import type { AgentId, AgentNeeds, AgentState, ChatMessage, ChatThread, EmotionTone, LocationId, Position, SceneFocus, SimEvent, WorldPickup, WorldSnapshot } from "@/lib/types";
 
 const AGENT_ORDER: AgentId[] = ["reed", "loom", "clerk", "hammer", "witness", "whisper"];
 const TIME_SEQUENCE = ["dawn", "day", "dusk", "night"] as const;
@@ -23,66 +23,6 @@ const locationLabels: Record<LocationId, string> = {
   hut_loom: "Rahul's room",
   hut_clerk: "Mahesh's room",
   hut_witness: "Beggar's corner",
-};
-
-const speechBook: Record<AgentId, string[]> = {
-  reed: [
-    "Listen, the whole mohalla moves when I decide to move.",
-    "You people keep debating, I keep taking the stage.",
-    "If you want order, stop doing bakchodi and follow the plan.",
-  ],
-  loom: [
-    "Bhai, chill thoda. Not every fight needs a drumroll.",
-    "I am saying this softly, but someone here is doing pure nautanki.",
-    "Maybe we talk like normal people for one minute, haan?",
-  ],
-  clerk: [
-    "Abe dono side se dimag kharab mat karo, subah se bakbak hi chal rahi hai.",
-    "I swear, ek aur fake speech and I am roasting everybody here.",
-    "You both are impossible. Full time drama, zero sense.",
-  ],
-  hammer: [
-    "Guys, relax. Fight later, first let me finish this sketch.",
-    "This whole scene is messy, but visually kind of iconic.",
-    "I love you idiots, but your energy is pure landfill today.",
-  ],
-  witness: [
-    "Sahab log, thoda paisa do or at least stop shouting in my ear.",
-    "From the footpath, all of you look equally confused.",
-    "I have seen bigger men than you cry over smaller egos.",
-  ],
-  whisper: [
-    "Sun, main bas itna bol raha hoon, us bande pe bharosa mat kar.",
-    "I never lie directly. I just place doubt in the right ear.",
-    "One rumor, and the whole village starts eating itself.",
-  ],
-};
-
-const debateBook: Record<AgentId, string[]> = {
-  reed: [
-    "If you cannot lead, do not stand in my way and mumble philosophy.",
-    "This is not humility, this is weakness dressed like decency.",
-  ],
-  loom: [
-    "Boss energy is useless if every sentence sounds like self-promotion.",
-    "You call it strength; half the time it is just volume and posture.",
-  ],
-  clerk: [
-    "Bas kar yaar, one more speech and I will personally call out this whole chutiyapa.",
-    "Both of you act like the world is your family group chat. Shut up for two seconds.",
-  ],
-  hammer: [
-    "I can literally paint this fight from memory now, same male ego, new lighting.",
-    "If you two want war, at least make it interesting and not repetitive nonsense.",
-  ],
-  witness: [
-    "Arre wah, rich people fighting again. Very original, very premium tamasha.",
-    "Keep barking, sahab. The road still belongs more to dust than to ego.",
-  ],
-  whisper: [
-    "I only said what everyone is already thinking, yaar.",
-    "I am not starting fights, I am just helping truths travel faster.",
-  ],
 };
 
 const starterWeapons: Record<AgentId, string | null> = {
@@ -116,6 +56,25 @@ const weaponPower: Record<string, number> = {
   "steel bottle": 12,
   "paint knife": 14,
   "rusted stick": 9,
+};
+
+const locationSceneFocus: Partial<Record<LocationId, SceneFocus>> = {
+  fire: "gossip",
+  square: "confrontation",
+  well: "gossip",
+  road: "trade",
+  store: "trade",
+  clinic: "healing",
+  jail: "jail-vote",
+  archive: "reflection",
+  shrine: "reflection",
+  garden: "alliance",
+  gate: "survival",
+  shed: "survival",
+  hut_reed: "rest",
+  hut_loom: "rest",
+  hut_clerk: "rest",
+  hut_witness: "rest",
 };
 
 function createInitialPickups(): WorldPickup[] {
@@ -189,6 +148,135 @@ function preferredLocation(agent: AgentState): LocationId {
 
   const options = byNature[agent.id];
   return options[(Math.floor(Math.random() * options.length) + agent.position.x + agent.position.y) % options.length];
+}
+
+function homeLocationFor(agent: AgentState): LocationId {
+  if (agent.id === "reed") return "hut_reed";
+  if (agent.id === "loom") return "hut_loom";
+  if (agent.id === "clerk") return "hut_clerk";
+  if (agent.id === "witness") return "hut_witness";
+  return "road";
+}
+
+function scheduleLocationFor(agent: AgentState, world: WorldSnapshot["world"]): LocationId {
+  if (!agent.alive) return "jail";
+  if (agent.jailedUntilTick > world.tick) return "jail";
+  if (agent.life < 42 || (agent.life < 58 && agent.inventory.medicine < 1)) return "clinic";
+  if (agent.needs.hunger > 72) return agent.id === "loom" ? "garden" : "store";
+  if (agent.needs.fatigue > 80 || (world.timeOfDay === "night" && agent.energy < 58)) return homeLocationFor(agent);
+
+  if (world.timeOfDay === "dawn") {
+    const dawnPlan: Record<AgentId, LocationId> = {
+      reed: "shrine",
+      loom: "garden",
+      clerk: "archive",
+      hammer: "well",
+      witness: "store",
+      whisper: "road",
+    };
+
+    return dawnPlan[agent.id];
+  }
+
+  if (world.timeOfDay === "day") {
+    const dayPlan: Record<AgentId, LocationId> = {
+      reed: "square",
+      loom: "garden",
+      clerk: "road",
+      hammer: "square",
+      witness: "well",
+      whisper: "store",
+    };
+
+    return dayPlan[agent.id];
+  }
+
+  if (world.timeOfDay === "dusk") {
+    const duskPlan: Record<AgentId, LocationId> = {
+      reed: "fire",
+      loom: "fire",
+      clerk: "well",
+      hammer: "fire",
+      witness: "fire",
+      whisper: "square",
+    };
+
+    return duskPlan[agent.id];
+  }
+
+  const nightPlan: Record<AgentId, LocationId> = {
+    reed: "hut_reed",
+    loom: "hut_loom",
+    clerk: "hut_clerk",
+    hammer: "road",
+    witness: "hut_witness",
+    whisper: "jail",
+  };
+
+  return nightPlan[agent.id];
+}
+
+function agentSceneFocus(agent: AgentState, world: WorldSnapshot["world"]): SceneFocus {
+  if (!agent.alive) return "survival";
+  if (agent.jailedUntilTick > world.tick) return "jail-vote";
+  if (agent.life < 45) return "healing";
+  if (agent.needs.hunger > 70 || agent.energy < 28) return "survival";
+  if (world.tension > 72 && agent.weapon) return "confrontation";
+  if (world.timeOfDay === "dawn") return "reflection";
+  if (world.timeOfDay === "night") return "rest";
+  return locationSceneFocus[agent.currentLocationId] ?? "gossip";
+}
+
+function chooseCommittedDestination(agent: AgentState, agents: AgentState[], world: WorldSnapshot["world"], decision?: AIDecision) {
+  const scheduledLocation = scheduleLocationFor(agent, world);
+  const decisionLocation = resolveDecisionDestination(agent, agents, world, decision);
+  const hostileEnemy = strongestEnemy(agent, agents);
+
+  let destination = decisionLocation;
+
+  if (agent.needs.social < 45 && world.timeOfDay !== "dusk") {
+    destination = scheduledLocation;
+  }
+
+  if (hostileEnemy && relationshipValue(agent, hostileEnemy.id) < -50 && world.tension > 64 && hostileEnemy.alive) {
+    destination = hostileEnemy.currentLocationId;
+  }
+
+  if (agent.targetLocationId === destination && agent.destinationCommitment > 0) {
+    return {
+      destination,
+      commitment: Math.max(agent.destinationCommitment - 1, 2),
+    };
+  }
+
+  const tripDistance = distance(agent.position, locationPositions[destination]);
+  return {
+    destination,
+    commitment: clamp(3 + tripDistance + (world.timeOfDay === "night" ? 2 : 0), 3, 12),
+  };
+}
+
+function activeDestinationFor(agent: AgentState, agents: AgentState[], world: WorldSnapshot["world"], decision?: AIDecision): LocationId {
+  const reachedTarget = distance(agent.position, locationPositions[agent.targetLocationId]) <= 1;
+  const shouldRefresh =
+    reachedTarget ||
+    agent.destinationCommitment <= 0 ||
+    agent.jailedUntilTick > world.tick ||
+    agent.life < 40 ||
+    (world.timeOfDay === "night" && agent.targetLocationId !== homeLocationFor(agent) && agent.id !== "whisper");
+
+  if (!shouldRefresh) {
+    return agent.targetLocationId;
+  }
+
+  const nextPlan = chooseCommittedDestination(agent, agents, world, decision);
+  agent.targetLocationId = nextPlan.destination;
+  agent.destinationCommitment = nextPlan.commitment;
+  return nextPlan.destination;
+}
+
+function rememberLine(agent: AgentState, line: string) {
+  agent.recentLines = [line, ...agent.recentLines.filter((entry) => entry !== line)].slice(0, 4);
 }
 
 function getCandidateSteps(start: Position, target: Position): Position[] {
@@ -340,11 +428,12 @@ function richestBuyerAround(agent: AgentState, agents: AgentState[]) {
     .sort((left, right) => right.money - left.money)[0];
 }
 
-function composeSpeech(agent: AgentState, tick: number, tension: number, suggested?: string) {
-  if (suggested && suggested.trim().length > 0) return suggested.trim();
+function composeSpeech(agent: AgentState, suggested?: string) {
+  if (suggested && suggested.trim().length > 0) {
+    return suggested.trim();
+  }
 
-  const source = tension > 44 || agent.id === "hammer" ? debateBook[agent.id] : speechBook[agent.id];
-  return source[tick % source.length];
+  return null;
 }
 
 function maybeCreateGroupMoment(snapshot: WorldSnapshot, threads: ChatThread[]) {
@@ -534,8 +623,8 @@ function maybeHandleEconomy(agent: AgentState, snapshot: WorldSnapshot, events: 
 function maybeHandleFight(agent: AgentState, nearby: AgentState | undefined, snapshot: WorldSnapshot, events: SimEvent[]) {
   if (!nearby || !agent.weapon) return;
   if (relationshipValue(agent, nearby.id) > -48) return;
-  if (snapshot.world.tension < 70) return;
-  if (Math.random() < 0.82) return;
+  if (snapshot.world.tension < 64) return;
+  if (Math.random() < 0.7) return;
 
   const attackPower = weaponPower[agent.weapon] ?? 8;
   const damage = Math.max(4, Math.round(attackPower * (0.4 + Math.random() * 0.6)));
@@ -566,8 +655,8 @@ function maybeDefendAlly(agent: AgentState, agents: AgentState[], snapshot: Worl
 function maybeHandleThreat(agent: AgentState, nearby: AgentState | undefined, snapshot: WorldSnapshot, events: SimEvent[]) {
   if (!nearby || !agent.weapon) return;
   if (!nearby.alive) return;
-  if (snapshot.world.tension < 62) return;
-  if (Math.random() < 0.75) return;
+  if (snapshot.world.tension < 54) return;
+  if (Math.random() < 0.6) return;
 
   agent.currentAction = "threaten";
   nearby.energy = clamp(nearby.energy - 6);
@@ -589,7 +678,7 @@ function maybeSpreadRumor(agent: AgentState, agents: AgentState[], snapshot: Wor
     .filter((other) => other.id !== agent.id && other.id !== target?.id && other.alive)
     .sort((left, right) => relationshipValue(target ?? agent, left.id) - relationshipValue(target ?? agent, right.id))[0];
 
-  if (!target || !victim || Math.random() < 0.55) return;
+  if (!target || !victim || Math.random() < 0.38) return;
 
   agent.currentAction = "spread-rumor";
   shiftRelationship(target, victim.id, -14);
@@ -690,7 +779,8 @@ function applyAdvancedSystems(snapshot: WorldSnapshot, events: SimEvent[]) {
     if (!agent || !agent.alive) continue;
 
     occupied.delete(`${agent.position.x}:${agent.position.y}`);
-    const destination = preferredLocation(agent);
+    agent.sceneFocus = agentSceneFocus(agent, snapshot.world);
+    const destination = activeDestinationFor(agent, snapshot.agents, snapshot.world);
     const targetPosition = locationPositions[destination];
     const before = { ...agent.position };
     const newPosition = nextStepToward(agent.position, targetPosition, occupied);
@@ -700,6 +790,7 @@ function applyAdvancedSystems(snapshot: WorldSnapshot, events: SimEvent[]) {
       agent.position = newPosition;
       agent.currentAction = "walk";
       agent.currentGoal = describeGoal(destination);
+       agent.destinationCommitment = Math.max(agent.destinationCommitment - 1, 0);
       occupied.add(`${newPosition.x}:${newPosition.y}`);
 
       const matchingLocation = (Object.entries(locationPositions).find(
@@ -710,6 +801,7 @@ function applyAdvancedSystems(snapshot: WorldSnapshot, events: SimEvent[]) {
       events.push(createEvent(snapshot, "movement", `${agent.name} walked toward the ${locationLabels[destination]}.`, agent.currentLocationId));
     } else {
       occupied.add(`${agent.position.x}:${agent.position.y}`);
+      agent.destinationCommitment = Math.max(agent.destinationCommitment - 1, 0);
       agent.currentAction = destination === agent.currentLocationId ? "linger" : "wait";
       agent.currentGoal = describeGoal(destination);
     }
@@ -722,12 +814,24 @@ function applyAdvancedSystems(snapshot: WorldSnapshot, events: SimEvent[]) {
     const partners = nearbyPartners(agent, activeAgents(snapshot.agents));
     const nearby = partners[0];
 
-    if (nearby && agent.speechCooldown === 0 && Math.random() > 0.45) {
-      const line = speechBook[agent.id][snapshot.world.tick % speechBook[agent.id].length];
+    if (nearby && agent.speechCooldown === 0 && Math.random() > 0.35) {
+      const line = composeSpeech(agent);
+      if (!line) {
+        maybeHandleThreat(agent, nearby, snapshot, events);
+        maybeHandleFight(agent, nearby, snapshot, events);
+        maybeDefendAlly(agent, snapshot.agents, snapshot, events);
+        maybeSpreadRumor(agent, snapshot.agents, snapshot, events);
+        maybeRepairRelationship(agent, nearby);
+        agent.mood = pickMood(agent.needs);
+        occupied.add(`${agent.position.x}:${agent.position.y}`);
+        continue;
+      }
+
       agent.currentAction = "speak";
       agent.speechCooldown = 3;
       agent.needs.social = clamp(agent.needs.social - 14);
       agent.lastThought = `This is the moment to say it before the group changes shape again.`;
+      rememberLine(agent, line);
       events.push(createEvent(snapshot, "speech", `${agent.name} to ${nearby.name}: "${line}"`, agent.currentLocationId));
 
       const thread = threadForAgent(agent, snapshot.chatThreads);
@@ -769,22 +873,47 @@ function maybeRepairRelationship(agent: AgentState, nearby: AgentState | undefin
   }
 }
 
-async function generateDecisionMap(snapshot: WorldSnapshot) {
-  const decisions = await Promise.all(
-    snapshot.agents.map(async (agent) => {
-      const thread = threadForAgent(agent, snapshot.chatThreads);
-      const payload = createAgentPromptPayload(snapshot, agent, thread ?? null);
-      const decision = await generateLocalFallbackDecision(payload);
-      return [agent.id, decision] as const;
-    }),
-  );
+function maybeCreateSceneMoment(agent: AgentState, nearby: AgentState | undefined, snapshot: WorldSnapshot, events: SimEvent[]) {
+  if (!nearby || !agent.alive) return;
+  if (distance(agent.position, nearby.position) > 2) return;
+  if (Math.random() < 0.72) return;
 
-  return new Map(decisions);
+  if (agent.sceneFocus === "alliance" && relationshipValue(agent, nearby.id) > 18) {
+    shiftRelationship(agent, nearby.id, 5);
+    shiftRelationship(nearby, agent.id, 5);
+    events.push(createEvent(snapshot, "group", `${agent.name} and ${nearby.name} quietly align near the ${locationLabels[agent.currentLocationId]}.`, agent.currentLocationId));
+    return;
+  }
+
+  if (agent.sceneFocus === "trade" && agent.money > 0 && nearby.inventory.goods > 0 && Math.random() > 0.4) {
+    nearby.inventory.goods -= 1;
+    agent.inventory.goods += 1;
+    agent.money -= 1;
+    nearby.money += 1;
+    shiftRelationship(agent, nearby.id, 4);
+    shiftRelationship(nearby, agent.id, 4);
+    events.push(createEvent(snapshot, "sell", `${agent.name} made a small roadside deal with ${nearby.name}.`, agent.currentLocationId));
+    return;
+  }
+
+  if (agent.sceneFocus === "confrontation" && relationshipValue(agent, nearby.id) < -20) {
+    snapshot.world.tension = clamp(snapshot.world.tension + 3, 0, 100);
+    events.push(createEvent(snapshot, "group", `${agent.name} and ${nearby.name} squared up in a public confrontation.`, agent.currentLocationId));
+  }
+}
+
+async function generateDecisionMap(snapshot: WorldSnapshot) {
+  const payloads = snapshot.agents.map((agent) => {
+    const thread = threadForAgent(agent, snapshot.chatThreads);
+    return createAgentPromptPayload(snapshot, agent, thread ?? null);
+  });
+
+  return generateLocalFallbackDecisionMap(payloads);
 }
 
 export async function tickSimulationWithDecisions(
   snapshot: WorldSnapshot,
-  resolveDecision: (payload: ReturnType<typeof createAgentPromptPayload>) => Promise<AIDecision>,
+  resolveDecisionBatch: (payloads: AgentPromptPayload[]) => Promise<Map<AgentId, AIDecision>>,
 ): Promise<WorldSnapshot> {
   const nextTick = snapshot.world.tick + 1;
   const day = 1 + Math.floor(nextTick / 24);
@@ -816,6 +945,7 @@ export async function tickSimulationWithDecisions(
       ...agent,
       speechCooldown: Math.max(0, agent.speechCooldown - 1),
       jailedUntilTick: agent.jailedUntilTick > 0 && agent.jailedUntilTick <= nextTick ? 0 : agent.jailedUntilTick,
+      destinationCommitment: Math.max(0, agent.destinationCommitment - 1),
       life: clamp(agent.life - (agent.needs.hunger > 82 ? 3 : 0) - (agent.energy < 12 ? 2 : 0), 0, 100),
       energy: clamp(agent.energy - 4, 0, 100),
       needs: {
@@ -831,20 +961,18 @@ export async function tickSimulationWithDecisions(
     pickups: snapshot.pickups.map((pickup) => ({ ...pickup })),
   };
 
-  const decisionPairs = await Promise.all(
-    nextSnapshot.agents.map(async (agent) => {
-      const thread = threadForAgent(agent, nextSnapshot.chatThreads);
-      const payload = createAgentPromptPayload(nextSnapshot, agent, thread ?? null);
+  const payloads = nextSnapshot.agents.map((agent) => {
+    const thread = threadForAgent(agent, nextSnapshot.chatThreads);
+    return createAgentPromptPayload(nextSnapshot, agent, thread ?? null);
+  });
 
-      try {
-        return [agent.id, await resolveDecision(payload)] as const;
-      } catch {
-        return [agent.id, await generateLocalFallbackDecision(payload)] as const;
-      }
-    }),
-  );
+  let decisions: Map<AgentId, AIDecision>;
 
-  const decisions = new Map<AgentId, AIDecision>(decisionPairs);
+  try {
+    decisions = await resolveDecisionBatch(payloads);
+  } catch {
+    decisions = await generateLocalFallbackDecisionMap(payloads);
+  }
 
   const events: SimEvent[] = [];
   const occupied = new Set(nextSnapshot.agents.map((agent) => `${agent.position.x}:${agent.position.y}`));
@@ -857,7 +985,8 @@ export async function tickSimulationWithDecisions(
     const decision = decisions.get(agent.id);
     occupied.delete(`${agent.position.x}:${agent.position.y}`);
 
-    const destination = resolveDecisionDestination(agent, nextSnapshot.agents, nextSnapshot.world, decision);
+    agent.sceneFocus = agentSceneFocus(agent, nextSnapshot.world);
+    const destination = activeDestinationFor(agent, nextSnapshot.agents, nextSnapshot.world, decision);
     const targetPosition = locationPositions[destination];
     const before = { ...agent.position };
     const newPosition = nextStepToward(agent.position, targetPosition, occupied);
@@ -867,6 +996,7 @@ export async function tickSimulationWithDecisions(
       agent.position = newPosition;
       agent.currentAction = "walk";
       agent.currentGoal = describeGoal(destination);
+      agent.destinationCommitment = Math.max(agent.destinationCommitment - 1, 0);
       occupied.add(`${newPosition.x}:${newPosition.y}`);
 
       const matchingLocation = (Object.entries(locationPositions).find(
@@ -879,6 +1009,7 @@ export async function tickSimulationWithDecisions(
       );
     } else {
       occupied.add(`${agent.position.x}:${agent.position.y}`);
+      agent.destinationCommitment = Math.max(agent.destinationCommitment - 1, 0);
       agent.currentAction = destination === agent.currentLocationId ? "linger" : "wait";
       agent.currentGoal = describeGoal(destination);
     }
@@ -911,15 +1042,29 @@ export async function tickSimulationWithDecisions(
         clusterSize >= 2 ||
         agent.needs.social > 42 ||
         nextSnapshot.world.tension > 48 ||
-        agent.id === "hammer") &&
+        agent.id === "hammer" ||
+        agent.sceneFocus === "gossip" ||
+        agent.sceneFocus === "confrontation") &&
       Math.random() > 0.2;
 
-      if (canSpeak && shouldSpeak) {
-      const line = composeSpeech(agent, nextTick, nextSnapshot.world.tension, spokenLine);
+    if (canSpeak && shouldSpeak) {
+      const line = composeSpeech(agent, spokenLine);
+      if (!line) {
+        maybeHandleThreat(agent, nearby, nextSnapshot, events);
+        maybeHandleFight(agent, nearby, nextSnapshot, events);
+        maybeDefendAlly(agent, nextSnapshot.agents, nextSnapshot, events);
+        maybeSpreadRumor(agent, nextSnapshot.agents, nextSnapshot, events);
+        maybeCreateSceneMoment(agent, nearby, nextSnapshot, events);
+        maybeRepairRelationship(agent, nearby);
+        agent.mood = pickMood(agent.needs);
+        continue;
+      }
+
       agent.currentAction = "speak";
       agent.speechCooldown = 2;
       agent.needs.social = clamp(agent.needs.social - 14);
       agent.lastThought = decision?.thought ?? `${agent.name} decides the silence has gone on too long.`;
+      rememberLine(agent, line);
       events.push(createEvent(nextSnapshot, "speech", `${agent.name} to ${nearby.name}: "${line}"`, agent.currentLocationId));
 
       const thread = threadForAgent(agent, nextSnapshot.chatThreads);
@@ -942,6 +1087,7 @@ export async function tickSimulationWithDecisions(
     maybeHandleFight(agent, nearby, nextSnapshot, events);
     maybeDefendAlly(agent, nextSnapshot.agents, nextSnapshot, events);
     maybeSpreadRumor(agent, nextSnapshot.agents, nextSnapshot, events);
+    maybeCreateSceneMoment(agent, nearby, nextSnapshot, events);
     maybeRepairRelationship(agent, nearby);
 
     agent.mood = pickMood(agent.needs);
@@ -998,11 +1144,15 @@ export function createInitialSnapshot(): WorldSnapshot {
         archetype: "dominant, self-certain political heavyweight",
         position: { ...locationPositions.fire },
         currentLocationId: "fire",
+        targetLocationId: "square",
         mood: "calm",
+        sceneFocus: "confrontation",
         currentGoal: "take over the square conversation",
         currentAction: "wait",
         lastThought: "If I control the tone, I control the room.",
         speechCooldown: 0,
+        destinationCommitment: 5,
+        recentLines: [],
         alive: true,
         jailedUntilTick: 0,
         life: 92,
@@ -1020,11 +1170,15 @@ export function createInitialSnapshot(): WorldSnapshot {
         archetype: "soft-spoken rival trying to stay decent in chaos",
         position: { x: locationPositions.garden.x + 1, y: locationPositions.garden.y },
         currentLocationId: "garden",
+        targetLocationId: "garden",
         mood: "calm",
+        sceneFocus: "alliance",
         currentGoal: "push back without becoming the loudest voice",
         currentAction: "wait",
         lastThought: "Maybe calm words still matter, even in this circus.",
         speechCooldown: 0,
+        destinationCommitment: 4,
+        recentLines: [],
         alive: true,
         jailedUntilTick: 0,
         life: 88,
@@ -1042,11 +1196,15 @@ export function createInitialSnapshot(): WorldSnapshot {
         archetype: "foul-mouthed chaos engine with zero patience",
         position: { x: locationPositions.archive.x + 1, y: locationPositions.archive.y },
         currentLocationId: "archive",
+        targetLocationId: "road",
         mood: "uneasy",
+        sceneFocus: "reflection",
         currentGoal: "abuse both sides and stir the pot",
         currentAction: "wait",
         lastThought: "One clean insult can do more than ten fake speeches.",
         speechCooldown: 0,
+        destinationCommitment: 5,
+        recentLines: [],
         alive: true,
         jailedUntilTick: 0,
         life: 84,
@@ -1064,11 +1222,15 @@ export function createInitialSnapshot(): WorldSnapshot {
         archetype: "cool artist girlfriend who sees the comedy in everybody",
         position: { x: locationPositions.square.x + 1, y: locationPositions.square.y },
         currentLocationId: "square",
+        targetLocationId: "fire",
         mood: "resolute",
+        sceneFocus: "gossip",
         currentGoal: "keep the vibe alive while roasting the nonsense",
         currentAction: "wait",
         lastThought: "This mess is toxic, funny, and weirdly inspiring.",
         speechCooldown: 0,
+        destinationCommitment: 4,
+        recentLines: [],
         alive: true,
         jailedUntilTick: 0,
         life: 90,
@@ -1086,11 +1248,15 @@ export function createInitialSnapshot(): WorldSnapshot {
         archetype: "streetwise survivor who reads everyone instantly",
         position: { x: locationPositions.fire.x - 1, y: locationPositions.fire.y },
         currentLocationId: "fire",
+        targetLocationId: "store",
         mood: "calm",
+        sceneFocus: "survival",
         currentGoal: "stay fed, stay sharp, and watch the rich self-destruct",
         currentAction: "wait",
         lastThought: "People with power are always loudest when they are least sure.",
         speechCooldown: 0,
+        destinationCommitment: 6,
+        recentLines: [],
         alive: true,
         jailedUntilTick: 0,
         life: 74,
@@ -1108,11 +1274,15 @@ export function createInitialSnapshot(): WorldSnapshot {
         archetype: "rumor broker who privately bends loyalties and starts fires between people",
         position: { x: locationPositions.well.x + 1, y: locationPositions.well.y + 1 },
         currentLocationId: "well",
+        targetLocationId: "road",
         mood: "curious",
+        sceneFocus: "gossip",
         currentGoal: "spread poison softly and profit from the fallout",
         currentAction: "wait",
         lastThought: "Truth is slow. Rumor runs on its own legs.",
         speechCooldown: 0,
+        destinationCommitment: 5,
+        recentLines: [],
         alive: true,
         jailedUntilTick: 0,
         life: 82,
@@ -1167,6 +1337,7 @@ export function tickSimulation(snapshot: WorldSnapshot): WorldSnapshot {
     agents: snapshot.agents.map((agent) => ({
       ...agent,
       speechCooldown: Math.max(0, agent.speechCooldown - 1),
+      destinationCommitment: Math.max(0, agent.destinationCommitment - 1),
       needs: {
         hunger: clamp(agent.needs.hunger + 2),
         fatigue: clamp(agent.needs.fatigue + 2),

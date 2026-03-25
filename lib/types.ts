@@ -35,6 +35,8 @@ export type EmotionTone =
   | "contemptuous"
   | "uneasy";
 
+export type SceneFocus = "gossip" | "confrontation" | "trade" | "healing" | "alliance" | "reflection" | "rest" | "survival" | "jail-vote";
+
 export interface Position {
   x: number;
   y: number;
@@ -91,11 +93,15 @@ export interface AgentState {
   archetype: string;
   position: Position;
   currentLocationId: LocationId;
+  targetLocationId: LocationId;
   mood: EmotionTone;
+  sceneFocus: SceneFocus;
   currentGoal: string;
   currentAction: string;
   lastThought: string;
   speechCooldown: number;
+  destinationCommitment: number;
+  recentLines: string[];
   alive: boolean;
   jailedUntilTick: number;
   life: number;
