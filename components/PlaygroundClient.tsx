@@ -77,12 +77,19 @@ export function PlaygroundClient() {
     mode: "unknown",
     note: "checking",
   });
+  const [aiCooldownUntil, setAiCooldownUntil] = useState(0);
   const [chatOpen, setChatOpen] = useState(false);
   const [peopleOpen, setPeopleOpen] = useState(false);
   const [hudOpen, setHudOpen] = useState(false);
   const snapshotRef = useRef(snapshot);
+  const aiCooldownUntilRef = useRef(0);
 
   snapshotRef.current = snapshot;
+
+  function updateAiCooldownUntil(value: number) {
+    aiCooldownUntilRef.current = value;
+    setAiCooldownUntil(value);
+  }
 
   useEffect(() => {
     setVillageSummary(buildVillageSummary(snapshot));
@@ -133,6 +140,13 @@ export function PlaygroundClient() {
 
       setAiStatus({ mode, note });
 
+      const fallbackError = typeof json?.error === "string" ? json.error.toLowerCase() : "";
+      if (mode === "fallback" && (fallbackError.includes("rate limit") || fallbackError.includes('429'))) {
+        updateAiCooldownUntil(Date.now() + 12000);
+      } else if (mode === "ai") {
+        updateAiCooldownUntil(0);
+      }
+
       return new Map<AgentId, AIDecision>(Object.entries(json.decisions) as Array<[AgentId, AIDecision]>);
     }
 
@@ -142,14 +156,31 @@ export function PlaygroundClient() {
       if (cancelled) return;
 
       try {
+        if (aiCooldownUntilRef.current > Date.now()) {
+          const nextSnapshot = tickSimulation(snapshotRef.current);
+          setAiStatus({
+            mode: "fallback",
+            note: `cooling down ${Math.max(1, Math.ceil((aiCooldownUntilRef.current - Date.now()) / 1000))}s`,
+          });
+          aiFailureCount += 1;
+          if (!cancelled) {
+            snapshotRef.current = nextSnapshot;
+            setSnapshot(nextSnapshot);
+          }
+        } else {
           const nextSnapshot = await tickSimulationWithDecisions(snapshotRef.current, requestDecisionBatch);
-        aiFailureCount = 0;
-        if (!cancelled) {
-          snapshotRef.current = nextSnapshot;
-          setSnapshot(nextSnapshot);
+          aiFailureCount = 0;
+          if (!cancelled) {
+            snapshotRef.current = nextSnapshot;
+            setSnapshot(nextSnapshot);
+          }
         }
       } catch (error) {
         aiFailureCount += 1;
+        const message = error instanceof Error ? error.message.toLowerCase() : "";
+        if (message.includes("rate limit") || message.includes("429")) {
+          updateAiCooldownUntil(Date.now() + 12000);
+        }
         setAiStatus({
           mode: "fallback",
           note: error instanceof Error ? `request failed: ${error.message.slice(0, 40)}` : "request failed",
@@ -241,7 +272,7 @@ export function PlaygroundClient() {
           </button>
         </div>
 
-        <EventFeed threads={snapshot.chatThreads} />
+        <EventFeed threads={snapshot.chatThreads} recentEvents={snapshot.recentEvents} />
       </aside>
 
       <aside className={`overlay-panel overlay-right ${peopleOpen ? "open" : ""}`}>

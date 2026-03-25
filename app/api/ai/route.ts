@@ -184,7 +184,7 @@ async function requestGeminiDecision(payload: AgentPromptPayload) {
     throw new Error("Missing GEMINI_API_KEY for ai mode.");
   }
 
-  const model = process.env.GEMINI_MODEL ?? "gemini-2.5-flash";
+  const model = process.env.GEMINI_MODEL ?? "gemini-3.1-flash-lite-preview";
   const system = [
     "You are controlling one autonomous character in a chaotic social village sim.",
     "Choose one grounded action.",
@@ -239,7 +239,7 @@ async function requestGeminiDecisionBatch(payload: BatchAgentPromptPayload) {
     throw new Error("Missing GEMINI_API_KEY for ai mode.");
   }
 
-  const model = process.env.GEMINI_MODEL ?? "gemini-2.5-flash";
+  const model = process.env.GEMINI_MODEL ?? "gemini-3.1-flash-lite-preview";
   const system = [
     "You are controlling multiple autonomous characters in a chaotic social village sim.",
     "Return one grounded decision per character.",
@@ -306,7 +306,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const provider = process.env.AI_PROVIDER ?? "mistral";
+    const provider = process.env.AI_PROVIDER ?? (process.env.GEMINI_API_KEY ? "gemini" : "mistral");
     if (isBatch) {
       const batchPayload = payload as BatchAgentPromptPayload;
       const content = provider === "gemini" ? await requestGeminiDecisionBatch(batchPayload) : await requestMistralDecisionBatch(batchPayload);

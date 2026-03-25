@@ -632,6 +632,9 @@ function maybeHandleFight(agent: AgentState, nearby: AgentState | undefined, sna
   agent.currentAction = "attack";
   nearby.life = clamp(nearby.life - damage, 0, 100);
   nearby.energy = clamp(nearby.energy - Math.round(damage / 2), 0, 100);
+  nearby.lastAttackerId = agent.id;
+  nearby.lastDamageTick = snapshot.world.tick;
+  nearby.lastDamageSummary = `${agent.name} attacked ${nearby.name} with ${agent.weapon} for ${damage} damage.`;
   shiftRelationship(agent, nearby.id, -22);
   shiftRelationship(nearby, agent.id, -30);
   snapshot.world.tension = clamp(snapshot.world.tension + 8, 0, 100);
@@ -661,6 +664,9 @@ function maybeHandleThreat(agent: AgentState, nearby: AgentState | undefined, sn
   agent.currentAction = "threaten";
   nearby.energy = clamp(nearby.energy - 6);
   nearby.life = clamp(nearby.life - 4, 0, 100);
+  nearby.lastAttackerId = agent.id;
+  nearby.lastDamageTick = snapshot.world.tick;
+  nearby.lastDamageSummary = `${agent.name} threatened ${nearby.name} with ${agent.weapon}.`;
   shiftRelationship(agent, nearby.id, -16);
   shiftRelationship(nearby, agent.id, -22);
   snapshot.world.tension = clamp(snapshot.world.tension + 5, 0, 100);
@@ -723,11 +729,31 @@ function maybeEliminateAgent(snapshot: WorldSnapshot, events: SimEvent[]) {
     if (!agent.alive) return;
     if (agent.life > 0) return;
 
+    const attacker = agent.lastAttackerId ? snapshot.agents.find((other) => other.id === agent.lastAttackerId) : null;
     agent.alive = false;
     agent.currentAction = "gone";
     agent.currentGoal = "their game is over";
     agent.currentLocationId = "jail";
-    events.push(createEvent(snapshot, "elimination", `${agent.name} is out. ${activeAgents(snapshot.agents).length} remain.`, "jail"));
+    events.push(
+      createEvent(
+        snapshot,
+        "elimination",
+        attacker
+          ? `${attacker.name} finished ${agent.name}. ${activeAgents(snapshot.agents).length} remain.`
+          : `${agent.name} is out. ${activeAgents(snapshot.agents).length} remain.`,
+        "jail",
+      ),
+    );
+
+    const thread = threadForAgent(attacker ?? agent, snapshot.chatThreads);
+    postThreadMessage(snapshot.chatThreads, thread.id, {
+      id: `elim-${snapshot.world.tick}-${agent.id}`,
+      tick: snapshot.world.tick,
+      kind: "system",
+      text: attacker
+        ? `${attacker.name} finished ${agent.name}. ${activeAgents(snapshot.agents).length} remain.`
+        : `${agent.name} dropped out of the village struggle.`,
+    });
   });
 }
 
@@ -946,6 +972,7 @@ export async function tickSimulationWithDecisions(
       speechCooldown: Math.max(0, agent.speechCooldown - 1),
       jailedUntilTick: agent.jailedUntilTick > 0 && agent.jailedUntilTick <= nextTick ? 0 : agent.jailedUntilTick,
       destinationCommitment: Math.max(0, agent.destinationCommitment - 1),
+      lastDamageSummary: agent.lastDamageTick === nextTick ? agent.lastDamageSummary : null,
       life: clamp(agent.life - (agent.needs.hunger > 82 ? 3 : 0) - (agent.energy < 12 ? 2 : 0), 0, 100),
       energy: clamp(agent.energy - 4, 0, 100),
       needs: {
@@ -1153,6 +1180,9 @@ export function createInitialSnapshot(): WorldSnapshot {
         speechCooldown: 0,
         destinationCommitment: 5,
         recentLines: [],
+        lastAttackerId: null,
+        lastDamageSummary: null,
+        lastDamageTick: -1,
         alive: true,
         jailedUntilTick: 0,
         life: 92,
@@ -1179,6 +1209,9 @@ export function createInitialSnapshot(): WorldSnapshot {
         speechCooldown: 0,
         destinationCommitment: 4,
         recentLines: [],
+        lastAttackerId: null,
+        lastDamageSummary: null,
+        lastDamageTick: -1,
         alive: true,
         jailedUntilTick: 0,
         life: 88,
@@ -1205,6 +1238,9 @@ export function createInitialSnapshot(): WorldSnapshot {
         speechCooldown: 0,
         destinationCommitment: 5,
         recentLines: [],
+        lastAttackerId: null,
+        lastDamageSummary: null,
+        lastDamageTick: -1,
         alive: true,
         jailedUntilTick: 0,
         life: 84,
@@ -1231,6 +1267,9 @@ export function createInitialSnapshot(): WorldSnapshot {
         speechCooldown: 0,
         destinationCommitment: 4,
         recentLines: [],
+        lastAttackerId: null,
+        lastDamageSummary: null,
+        lastDamageTick: -1,
         alive: true,
         jailedUntilTick: 0,
         life: 90,
@@ -1257,6 +1296,9 @@ export function createInitialSnapshot(): WorldSnapshot {
         speechCooldown: 0,
         destinationCommitment: 6,
         recentLines: [],
+        lastAttackerId: null,
+        lastDamageSummary: null,
+        lastDamageTick: -1,
         alive: true,
         jailedUntilTick: 0,
         life: 74,
@@ -1283,6 +1325,9 @@ export function createInitialSnapshot(): WorldSnapshot {
         speechCooldown: 0,
         destinationCommitment: 5,
         recentLines: [],
+        lastAttackerId: null,
+        lastDamageSummary: null,
+        lastDamageTick: -1,
         alive: true,
         jailedUntilTick: 0,
         life: 82,

@@ -466,6 +466,47 @@ button {
   font-weight: 700;
 }
 
+.critical-line,
+.critical-event-card.elimination {
+  background: linear-gradient(180deg, rgba(132, 31, 28, 0.92), rgba(177, 57, 43, 0.9));
+  color: #fff7f2;
+  font-weight: 700;
+}
+
+.critical-event-stack {
+  display: grid;
+  gap: 8px;
+}
+
+.critical-event-card {
+  padding: 12px 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(93, 128, 145, 0.12);
+  background: rgba(255, 255, 255, 0.78);
+  color: var(--text);
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+
+.critical-event-card.injury {
+  background: linear-gradient(180deg, rgba(255, 235, 227, 0.95), rgba(255, 244, 239, 0.9));
+  color: #803f35;
+}
+
+.critical-event-card.jail {
+  background: linear-gradient(180deg, rgba(235, 240, 248, 0.95), rgba(244, 247, 252, 0.92));
+  color: #42576d;
+}
+
+.critical-event-kicker {
+  margin-bottom: 6px;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  opacity: 0.8;
+}
+
 .standings-line {
   display: flex;
   align-items: center;

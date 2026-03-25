@@ -12,7 +12,7 @@ import {
   MessageList,
   TypingIndicator,
 } from "@chatscope/chat-ui-kit-react";
-import type { AgentId, ChatThread } from "@/lib/types";
+import type { AgentId, ChatThread, SimEvent } from "@/lib/types";
 
 const agentNames: Record<AgentId, string> = {
   reed: "Modi",
@@ -51,7 +51,7 @@ function getAvatarLetter(thread: ChatThread) {
   return thread.title.slice(0, 1).toUpperCase();
 }
 
-export function EventFeed({ threads }: { threads: ChatThread[] }) {
+export function EventFeed({ threads, recentEvents }: { threads: ChatThread[]; recentEvents: SimEvent[] }) {
   const orderedThreads = useMemo(
     () =>
       [...threads].sort(
@@ -77,6 +77,7 @@ export function EventFeed({ threads }: { threads: ChatThread[] }) {
   const primary = orderedThreads.find((thread) => thread.id === activeThreadId) ?? orderedThreads[0] ?? null;
   const rest = orderedThreads.filter((thread) => thread.id !== primary?.id);
   const currentTick = orderedThreads.reduce((latest, thread) => Math.max(latest, thread.updatedTick), 0);
+  const criticalEvents = recentEvents.filter((event) => event.type === "elimination" || event.type === "injury" || event.type === "jail").slice(0, 4);
   const primaryMessages = useMemo(() => {
     if (!primary) return [];
     return [...primary.messages].sort((left, right) => left.tick - right.tick);
@@ -180,6 +181,17 @@ export function EventFeed({ threads }: { threads: ChatThread[] }) {
           </ChatContainer>
         </MainContainer>
       </div>
+
+      {criticalEvents.length ? (
+        <div className="critical-event-stack">
+          {criticalEvents.map((event) => (
+            <div className={`critical-event-card ${event.type}`} key={event.id}>
+              <div className="critical-event-kicker">{event.type === "elimination" ? "Fatal Moment" : event.type === "jail" ? "Jail Move" : "Violence"}</div>
+              <div>{event.summary}</div>
+            </div>
+          ))}
+        </div>
+      ) : null}
 
       {rest.length > 0 ? (
         <div className="thread-strip">

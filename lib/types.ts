@@ -102,6 +102,9 @@ export interface AgentState {
   speechCooldown: number;
   destinationCommitment: number;
   recentLines: string[];
+  lastAttackerId: AgentId | null;
+  lastDamageSummary: string | null;
+  lastDamageTick: number;
   alive: boolean;
   jailedUntilTick: number;
   life: number;

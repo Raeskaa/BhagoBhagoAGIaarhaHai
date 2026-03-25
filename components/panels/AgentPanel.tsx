@@ -77,6 +77,10 @@ function latestMoment(agent: AgentState, events: SimEvent[]) {
   return events.find((event) => event.summary.includes(agent.name));
 }
 
+function latestElimination(events: SimEvent[]) {
+  return events.find((event) => event.type === "elimination");
+}
+
 function relationshipSummary(agent: AgentState, agents: AgentState[]) {
   const entries = Object.entries(agent.relationships)
     .map(([agentId, score]) => ({
@@ -131,6 +135,7 @@ export function AgentPanel({ agents, threads, recentEvents, villageSummary, sele
   const latestEvent = selectedAgent ? latestMoment(selectedAgent, recentEvents) : null;
   const relationshipState = selectedAgent ? relationshipSummary(selectedAgent, agents) : null;
   const latestVote = recentEvents.find((event) => event.type === "vote" || event.type === "jail" || event.type === "elimination");
+  const latestKill = latestElimination(recentEvents);
   const leader = currentLeader(agents);
   const matrix = relationshipMatrix(agents);
   const currentTick = recentEvents[0]?.tick ?? 0;
@@ -151,6 +156,8 @@ export function AgentPanel({ agents, threads, recentEvents, villageSummary, sele
         <div className="summary-line strong-line">
           alive {aliveCount(agents)} / jailed {jailedCount(agents, recentEvents[0]?.tick ?? 0)}
         </div>
+
+        {latestKill ? <div className="summary-line critical-line">{latestKill.summary}</div> : null}
 
         {latestVote ? <div className="summary-line">{latestVote.summary}</div> : null}
 
@@ -290,6 +297,12 @@ export function AgentPanel({ agents, threads, recentEvents, villageSummary, sele
               <div className="mini-label">Latest Moment</div>
               <div className="mini-value">
                 {latestEvent?.summary ?? "No notable movement yet in this cycle."}
+              </div>
+            </div>
+            <div>
+              <div className="mini-label">Last Hit</div>
+              <div className="mini-value">
+                {selectedAgent.lastDamageSummary ?? "No recent violence landed on them."}
               </div>
             </div>
             <div>
