@@ -31,13 +31,76 @@ function extractJsonObject(input: string) {
   return input.slice(start, end + 1);
 }
 
+function sanitizeText(value: unknown, fallback: string, maxLength = 220) {
+  if (typeof value !== "string") return fallback;
+  const trimmed = value.trim();
+  if (!trimmed) return fallback;
+  return trimmed.slice(0, maxLength);
+}
+
+function mapAction(value: unknown) {
+  if (typeof value !== "string") return undefined;
+
+  switch (value) {
+    case "walk":
+    case "speak":
+    case "gather":
+    case "reflect":
+    case "rest":
+    case "wait":
+      return value;
+    case "move":
+      return "walk";
+    case "talk":
+      return "speak";
+    case "think":
+      return "reflect";
+    default:
+      return undefined;
+  }
+}
+
+function normalizeLocationCandidate(...values: unknown[]) {
+  return values.find((locationId): locationId is string => typeof locationId === "string" && ALLOWED_LOCATIONS.has(locationId));
+}
+
+function formatParseError(error: unknown) {
+  if (!error || typeof error !== "object") return "Invalid AI response shape";
+  const issues = (error as { issues?: Array<{ path?: Array<string | number>; message?: string }> }).issues;
+  const first = issues?.[0];
+  if (!first) return "Invalid AI response shape";
+  const path = first.path?.length ? first.path.join(".") : "response";
+  return `${path}: ${first.message ?? "invalid value"}`;
+}
+
 function normalizeDecisionShape(raw: unknown) {
   if (!raw || typeof raw !== "object") return raw;
 
   const candidate = raw as Record<string, unknown>;
 
   if (typeof candidate.action === "string") {
-    return candidate;
+    const mappedAction = mapAction(candidate.action) ?? "wait";
+    const targetLocationId = normalizeLocationCandidate(
+      candidate.targetLocationId,
+      candidate.locationId,
+      candidate.toLocationId,
+      candidate.fromLocationId,
+    );
+    const message = sanitizeText(
+      candidate.message ?? candidate.text ?? candidate.line ?? candidate.dialogue ?? candidate.details,
+      "",
+    );
+    const thought = sanitizeText(
+      candidate.thought ?? candidate.innerThought ?? candidate.reason ?? candidate.details,
+      "The village keeps moving even when the words fail.",
+    );
+
+    return {
+      action: mappedAction,
+      targetLocationId,
+      message: mappedAction === "speak" && message ? message : undefined,
+      thought,
+    };
   }
 
   if (candidate.action && typeof candidate.action === "object") {
@@ -62,15 +125,15 @@ function normalizeDecisionShape(raw: unknown) {
                   ? "wait"
                   : undefined;
 
-    const targetLocationId = [toLocationId, fromLocationId].find(
-      (locationId): locationId is string => typeof locationId === "string" && ALLOWED_LOCATIONS.has(locationId),
-    );
+    const targetLocationId = normalizeLocationCandidate(toLocationId, fromLocationId, candidate.targetLocationId);
+    const thought = sanitizeText(details, "The village keeps moving even when the words fail.");
+    const message = sanitizeText(details, "");
 
     return {
       action: mappedAction ?? "wait",
       targetLocationId,
-      message: mappedAction === "speak" ? details : undefined,
-      thought: details ?? "The village keeps moving even when the words fail.",
+      message: mappedAction === "speak" && message ? message : undefined,
+      thought,
     };
   }
 
@@ -80,8 +143,11 @@ function normalizeDecisionShape(raw: unknown) {
 function normalizeDecisionMapShape(raw: unknown) {
   if (!raw || typeof raw !== "object") return raw;
 
+  const candidate = raw as Record<string, unknown>;
+  const decisionMap = candidate.decisions && typeof candidate.decisions === "object" ? (candidate.decisions as Record<string, unknown>) : candidate;
+
   return Object.fromEntries(
-    Object.entries(raw as Record<string, unknown>).map(([agentId, decision]) => [agentId, normalizeDecisionShape(decision)]),
+    Object.entries(decisionMap).map(([agentId, decision]) => [agentId, normalizeDecisionShape(decision)]),
   );
 }
 
@@ -309,13 +375,19 @@ export async function POST(request: Request) {
     const provider = process.env.AI_PROVIDER ?? (process.env.GEMINI_API_KEY ? "gemini" : "mistral");
     if (isBatch) {
       const batchPayload = payload as BatchAgentPromptPayload;
-      const content = provider === "gemini" ? await requestGeminiDecisionBatch(batchPayload) : await requestMistralDecisionBatch(batchPayload);
-      const parsedContent = normalizeDecisionMapShape(typeof content === "string" ? JSON.parse(extractJsonObject(content)) : content);
-      const parsed = aiDecisionMapSchema.safeParse(parsedContent);
+      let content = provider === "gemini" ? await requestGeminiDecisionBatch(batchPayload) : await requestMistralDecisionBatch(batchPayload);
+      let parsedContent = normalizeDecisionMapShape(typeof content === "string" ? JSON.parse(extractJsonObject(content)) : content);
+      let parsed = aiDecisionMapSchema.safeParse(parsedContent);
+
+      if (!parsed.success && provider === "gemini") {
+        content = await requestGeminiDecisionBatch(batchPayload);
+        parsedContent = normalizeDecisionMapShape(typeof content === "string" ? JSON.parse(extractJsonObject(content)) : content);
+        parsed = aiDecisionMapSchema.safeParse(parsedContent);
+      }
 
       if (!parsed.success) {
         const decisions = await generateLocalFallbackDecisionMap(batchPayload.agents);
-        return NextResponse.json({ mode: "fallback", provider, error: "Invalid AI decision map shape", decisions: Object.fromEntries(decisions) });
+        return NextResponse.json({ mode: "fallback", provider, error: formatParseError(parsed.error), decisions: Object.fromEntries(decisions) });
       }
 
       return NextResponse.json({ mode: "ai", provider, decisions: parsed.data });
@@ -327,7 +399,7 @@ export async function POST(request: Request) {
 
     if (!parsed.success) {
       const decision = await generateLocalFallbackDecision(payload as AgentPromptPayload);
-      return NextResponse.json({ mode: "fallback", provider, error: "Invalid AI decision shape", decision });
+      return NextResponse.json({ mode: "fallback", provider, error: formatParseError(parsed.error), decision });
     }
 
     return NextResponse.json({ mode: "ai", provider, decision: parsed.data });

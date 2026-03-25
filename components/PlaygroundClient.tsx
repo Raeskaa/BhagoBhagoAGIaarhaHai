@@ -150,6 +150,12 @@ export function PlaygroundClient() {
       return new Map<AgentId, AIDecision>(Object.entries(json.decisions) as Array<[AgentId, AIDecision]>);
     }
 
+    function nextStepDelay() {
+      if (aiCooldownUntilRef.current > Date.now()) return 2600;
+      if (aiFailureCount > 2) return 2400;
+      return 2100;
+    }
+
     let aiFailureCount = 0;
 
     async function step() {
@@ -193,11 +199,11 @@ export function PlaygroundClient() {
       }
 
       if (!cancelled) {
-        timer = window.setTimeout(step, aiFailureCount > 2 ? 2200 : 1300);
+        timer = window.setTimeout(step, nextStepDelay());
       }
     }
 
-    timer = window.setTimeout(step, 900);
+    timer = window.setTimeout(step, 1200);
 
     return () => {
       cancelled = true;

@@ -3,24 +3,29 @@ import type { AgentId, AgentState, ChatThread, LocationId, SimEvent, WorldSnapsh
 
 export const aiDecisionSchema = z.object({
   action: z.enum(["walk", "speak", "gather", "reflect", "rest", "wait"]),
-  targetLocationId: z
-    .enum([
-      "shrine",
-      "garden",
-      "archive",
-      "square",
-      "fire",
-      "well",
-      "store",
-      "road",
-      "gate",
-      "shed",
-      "hut_reed",
-      "hut_loom",
-      "hut_clerk",
-      "hut_witness",
-    ])
-    .optional(),
+  targetLocationId: z.preprocess(
+    (value) => (value == null ? undefined : value),
+    z
+      .enum([
+        "shrine",
+        "garden",
+        "archive",
+        "clinic",
+        "jail",
+        "square",
+        "fire",
+        "well",
+        "store",
+        "road",
+        "gate",
+        "shed",
+        "hut_reed",
+        "hut_loom",
+        "hut_clerk",
+        "hut_witness",
+      ])
+      .optional(),
+  ),
   message: z.string().max(220).optional(),
   thought: z.string().max(220),
 });
