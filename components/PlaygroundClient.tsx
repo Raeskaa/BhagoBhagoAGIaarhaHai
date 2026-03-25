@@ -217,6 +217,7 @@ export function PlaygroundClient() {
     () => (selectedAgentId ? snapshot.agents.find((agent) => agent.id === selectedAgentId) ?? null : null),
     [selectedAgentId, snapshot.agents],
   );
+  const latestDeath = snapshot.deathAftermaths[0] ?? null;
   const focusedAgentId = selectedAgentId ?? snapshot.agents[0]?.id;
   const shellStyle = {} as CSSProperties;
 
@@ -230,6 +231,7 @@ export function PlaygroundClient() {
   return (
     <main className="game-shell-fullscreen" style={shellStyle}>
       <section className="main-stage full-stage">
+        {latestDeath ? <div className="death-banner">{latestDeath.agentName} died</div> : null}
         <div className="floating-hud bottom-left-hud">
           <div className="overlay-toggle-row">
             <div className={`ai-status-badge ${aiStatus.mode}`} title={aiStatus.note}>

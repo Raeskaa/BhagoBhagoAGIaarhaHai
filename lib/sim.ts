@@ -90,6 +90,19 @@ function activeAgents(agents: AgentState[]) {
   return agents.filter((agent) => agent.alive);
 }
 
+function liveDecisionAgents(agents: AgentState[]) {
+  return agents.filter((agent) => agent.alive);
+}
+
+function withPanicState(agent: AgentState, nextTick: number) {
+  const stillPanicking = agent.panicUntilTick > nextTick;
+  return {
+    ...agent,
+    panicUntilTick: stillPanicking ? agent.panicUntilTick : 0,
+    panicSourcePosition: stillPanicking && agent.panicSourcePosition ? { ...agent.panicSourcePosition } : null,
+  };
+}
+
 function relationshipValue(agent: AgentState, otherId: AgentId) {
   return agent.relationships[otherId] ?? 0;
 }
@@ -297,6 +310,24 @@ function getCandidateSteps(start: Position, target: Position): Position[] {
 
 function nextStepToward(start: Position, target: Position, occupied: Set<string>): Position {
   for (const candidate of getCandidateSteps(start, target)) {
+    const key = `${candidate.x}:${candidate.y}`;
+    if (isWalkable(candidate) && !occupied.has(key)) {
+      return candidate;
+    }
+  }
+
+  return start;
+}
+
+function nextStepAwayFrom(start: Position, danger: Position, occupied: Set<string>): Position {
+  const candidates = [
+    { x: start.x + 1, y: start.y },
+    { x: start.x - 1, y: start.y },
+    { x: start.x, y: start.y + 1 },
+    { x: start.x, y: start.y - 1 },
+  ].sort((left, right) => distance(right, danger) - distance(left, danger));
+
+  for (const candidate of candidates) {
     const key = `${candidate.x}:${candidate.y}`;
     if (isWalkable(candidate) && !occupied.has(key)) {
       return candidate;
@@ -730,10 +761,11 @@ function maybeEliminateAgent(snapshot: WorldSnapshot, events: SimEvent[]) {
     if (agent.life > 0) return;
 
     const attacker = agent.lastAttackerId ? snapshot.agents.find((other) => other.id === agent.lastAttackerId) : null;
+    const deathPosition = { ...agent.position };
+    const deathLocationId = agent.currentLocationId;
     agent.alive = false;
     agent.currentAction = "gone";
-    agent.currentGoal = "their game is over";
-    agent.currentLocationId = "jail";
+    agent.currentGoal = "their body burns where they fell";
     events.push(
       createEvent(
         snapshot,
@@ -741,9 +773,29 @@ function maybeEliminateAgent(snapshot: WorldSnapshot, events: SimEvent[]) {
         attacker
           ? `${attacker.name} finished ${agent.name}. ${activeAgents(snapshot.agents).length} remain.`
           : `${agent.name} is out. ${activeAgents(snapshot.agents).length} remain.`,
-        "jail",
+        deathLocationId,
       ),
     );
+
+    snapshot.deathAftermaths.push({
+      id: `death-${snapshot.world.tick}-${agent.id}`,
+      agentId: agent.id,
+      agentName: agent.name,
+      locationId: deathLocationId,
+      position: deathPosition,
+      startedTick: snapshot.world.tick,
+      expiresAtTick: snapshot.world.tick + 12,
+      killerId: attacker?.id ?? null,
+    });
+
+    snapshot.agents.forEach((other) => {
+      if (!other.alive || other.id === agent.id) return;
+      if (distance(other.position, deathPosition) > 5) return;
+      other.panicUntilTick = Math.max(other.panicUntilTick, snapshot.world.tick + 6);
+      other.panicSourcePosition = { ...deathPosition };
+      other.currentAction = "flee";
+      other.currentGoal = `run from ${agent.name}'s burning body`;
+    });
 
     const thread = threadForAgent(attacker ?? agent, snapshot.chatThreads);
     postThreadMessage(snapshot.chatThreads, thread.id, {
@@ -779,6 +831,29 @@ function maybeDropPickupFromAgent(agent: AgentState, snapshot: WorldSnapshot) {
       agent.inventory.medicine = 0;
     }
   }
+}
+
+function applyDeathAftermath(snapshot: WorldSnapshot, events: SimEvent[]) {
+  snapshot.deathAftermaths = snapshot.deathAftermaths.filter((aftermath) => aftermath.expiresAtTick > snapshot.world.tick);
+
+  snapshot.agents.forEach((agent) => {
+    if (!agent.alive) return;
+    if (agent.panicUntilTick <= snapshot.world.tick || !agent.panicSourcePosition) {
+      if (agent.panicUntilTick <= snapshot.world.tick) {
+        agent.panicSourcePosition = null;
+      }
+      return;
+    }
+
+    agent.currentAction = "flee";
+    agent.currentGoal = "run from the burning body";
+  });
+
+  snapshot.deathAftermaths.forEach((aftermath) => {
+    if (snapshot.world.tick === aftermath.startedTick) {
+      events.push(createEvent(snapshot, "observation", `${aftermath.agentName}'s body catches fire and people scatter.`, aftermath.locationId));
+    }
+  });
 }
 
 function maybeCollectPickup(agent: AgentState, snapshot: WorldSnapshot, events: SimEvent[]) {
@@ -929,7 +1004,7 @@ function maybeCreateSceneMoment(agent: AgentState, nearby: AgentState | undefine
 }
 
 async function generateDecisionMap(snapshot: WorldSnapshot) {
-  const payloads = snapshot.agents.map((agent) => {
+  const payloads = liveDecisionAgents(snapshot.agents).map((agent) => {
     const thread = threadForAgent(agent, snapshot.chatThreads);
     return createAgentPromptPayload(snapshot, agent, thread ?? null);
   });
@@ -968,7 +1043,7 @@ export async function tickSimulationWithDecisions(
       },
     },
     agents: snapshot.agents.map((agent) => ({
-      ...agent,
+      ...withPanicState(agent, nextTick),
       speechCooldown: Math.max(0, agent.speechCooldown - 1),
       jailedUntilTick: agent.jailedUntilTick > 0 && agent.jailedUntilTick <= nextTick ? 0 : agent.jailedUntilTick,
       destinationCommitment: Math.max(0, agent.destinationCommitment - 1),
@@ -986,9 +1061,10 @@ export async function tickSimulationWithDecisions(
     recentEvents: [],
     chatThreads: assignThreads(snapshot.agents, nextTick, snapshot.chatThreads),
     pickups: snapshot.pickups.map((pickup) => ({ ...pickup })),
+    deathAftermaths: snapshot.deathAftermaths.map((aftermath) => ({ ...aftermath, position: { ...aftermath.position } })),
   };
 
-  const payloads = nextSnapshot.agents.map((agent) => {
+  const payloads = liveDecisionAgents(nextSnapshot.agents).map((agent) => {
     const thread = threadForAgent(agent, nextSnapshot.chatThreads);
     return createAgentPromptPayload(nextSnapshot, agent, thread ?? null);
   });
@@ -1002,6 +1078,7 @@ export async function tickSimulationWithDecisions(
   }
 
   const events: SimEvent[] = [];
+  applyDeathAftermath(nextSnapshot, events);
   const occupied = new Set(nextSnapshot.agents.map((agent) => `${agent.position.x}:${agent.position.y}`));
 
   for (const agentId of AGENT_ORDER) {
@@ -1014,9 +1091,12 @@ export async function tickSimulationWithDecisions(
 
     agent.sceneFocus = agentSceneFocus(agent, nextSnapshot.world);
     const destination = activeDestinationFor(agent, nextSnapshot.agents, nextSnapshot.world, decision);
-    const targetPosition = locationPositions[destination];
+    const panicStep = agent.panicUntilTick > nextSnapshot.world.tick && agent.panicSourcePosition
+      ? nextStepAwayFrom(agent.position, agent.panicSourcePosition, occupied)
+      : null;
+    const targetPosition = panicStep ?? locationPositions[destination];
     const before = { ...agent.position };
-    const newPosition = nextStepToward(agent.position, targetPosition, occupied);
+    const newPosition = panicStep ?? nextStepToward(agent.position, targetPosition, occupied);
     const moved = newPosition.x !== before.x || newPosition.y !== before.y;
 
     if (moved) {
@@ -1183,6 +1263,8 @@ export function createInitialSnapshot(): WorldSnapshot {
         lastAttackerId: null,
         lastDamageSummary: null,
         lastDamageTick: -1,
+        panicUntilTick: 0,
+        panicSourcePosition: null,
         alive: true,
         jailedUntilTick: 0,
         life: 92,
@@ -1212,6 +1294,8 @@ export function createInitialSnapshot(): WorldSnapshot {
         lastAttackerId: null,
         lastDamageSummary: null,
         lastDamageTick: -1,
+        panicUntilTick: 0,
+        panicSourcePosition: null,
         alive: true,
         jailedUntilTick: 0,
         life: 88,
@@ -1241,6 +1325,8 @@ export function createInitialSnapshot(): WorldSnapshot {
         lastAttackerId: null,
         lastDamageSummary: null,
         lastDamageTick: -1,
+        panicUntilTick: 0,
+        panicSourcePosition: null,
         alive: true,
         jailedUntilTick: 0,
         life: 84,
@@ -1270,6 +1356,8 @@ export function createInitialSnapshot(): WorldSnapshot {
         lastAttackerId: null,
         lastDamageSummary: null,
         lastDamageTick: -1,
+        panicUntilTick: 0,
+        panicSourcePosition: null,
         alive: true,
         jailedUntilTick: 0,
         life: 90,
@@ -1299,6 +1387,8 @@ export function createInitialSnapshot(): WorldSnapshot {
         lastAttackerId: null,
         lastDamageSummary: null,
         lastDamageTick: -1,
+        panicUntilTick: 0,
+        panicSourcePosition: null,
         alive: true,
         jailedUntilTick: 0,
         life: 74,
@@ -1328,6 +1418,8 @@ export function createInitialSnapshot(): WorldSnapshot {
         lastAttackerId: null,
         lastDamageSummary: null,
         lastDamageTick: -1,
+        panicUntilTick: 0,
+        panicSourcePosition: null,
         alive: true,
         jailedUntilTick: 0,
         life: 82,
@@ -1350,6 +1442,7 @@ export function createInitialSnapshot(): WorldSnapshot {
     ],
     chatThreads: createInitialThreads(),
     pickups: createInitialPickups(),
+    deathAftermaths: [],
   };
 }
 
@@ -1380,7 +1473,7 @@ export function tickSimulation(snapshot: WorldSnapshot): WorldSnapshot {
       },
     },
     agents: snapshot.agents.map((agent) => ({
-      ...agent,
+      ...withPanicState(agent, nextTick),
       speechCooldown: Math.max(0, agent.speechCooldown - 1),
       destinationCommitment: Math.max(0, agent.destinationCommitment - 1),
       needs: {
@@ -1394,9 +1487,11 @@ export function tickSimulation(snapshot: WorldSnapshot): WorldSnapshot {
     recentEvents: [],
     chatThreads: assignThreads(snapshot.agents, nextTick, snapshot.chatThreads),
     pickups: snapshot.pickups.map((pickup) => ({ ...pickup })),
+    deathAftermaths: snapshot.deathAftermaths.map((aftermath) => ({ ...aftermath, position: { ...aftermath.position } })),
   };
 
   const events: SimEvent[] = [];
+  applyDeathAftermath(nextSnapshot, events);
   applyAdvancedSystems(nextSnapshot, events);
 
   if (nextSnapshot.world.resources.fireHeat < 3) {

@@ -105,6 +105,8 @@ export interface AgentState {
   lastAttackerId: AgentId | null;
   lastDamageSummary: string | null;
   lastDamageTick: number;
+  panicUntilTick: number;
+  panicSourcePosition: Position | null;
   alive: boolean;
   jailedUntilTick: number;
   life: number;
@@ -168,12 +170,24 @@ export interface WorldPickup {
   label: string;
 }
 
+export interface DeathAftermath {
+  id: string;
+  agentId: AgentId;
+  agentName: string;
+  locationId: LocationId;
+  position: Position;
+  startedTick: number;
+  expiresAtTick: number;
+  killerId: AgentId | null;
+}
+
 export interface WorldSnapshot {
   world: WorldState;
   agents: AgentState[];
   recentEvents: SimEvent[];
   chatThreads: ChatThread[];
   pickups: WorldPickup[];
+  deathAftermaths: DeathAftermath[];
 }
 
 export interface VillageSummary {

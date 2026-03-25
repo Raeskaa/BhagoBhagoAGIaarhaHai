@@ -994,6 +994,23 @@ button {
   z-index: 5;
 }
 
+.death-banner {
+  position: absolute;
+  top: 18px;
+  left: 50%;
+  z-index: 9;
+  transform: translateX(-50%);
+  padding: 14px 22px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(124, 22, 20, 0.96), rgba(186, 52, 35, 0.92));
+  color: #fff4ee;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  box-shadow: 0 24px 60px rgba(110, 25, 18, 0.28);
+}
+
 .top-left-hud {
   top: 18px;
   left: 18px;

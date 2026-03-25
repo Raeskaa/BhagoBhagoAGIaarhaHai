@@ -27,6 +27,13 @@ type PickupBundle = {
   dot: Phaser.GameObjects.Arc;
 };
 
+type DeathAftermathBundle = {
+  ember: Phaser.GameObjects.Container;
+  flames: Phaser.GameObjects.Arc[];
+  smoke: Phaser.GameObjects.Arc[];
+  label: Phaser.GameObjects.Text;
+};
+
 const TILE = 32;
 const OFFSET_X = 32;
 const OFFSET_Y = 32;
@@ -126,6 +133,7 @@ export function createVillageScene(deps: SceneDeps) {
   return class VillageScene extends Phaser.Scene {
     private agentSprites = new Map<AgentId, AgentSpriteBundle>();
     private pickupSprites = new Map<string, PickupBundle>();
+    private deathAftermathSprites = new Map<string, DeathAftermathBundle>();
     private selectedRing?: Phaser.GameObjects.Rectangle;
 
     constructor() {
@@ -155,6 +163,7 @@ export function createVillageScene(deps: SceneDeps) {
 
     applySnapshot(nextSnapshot: WorldSnapshot, nextSelectedAgentId: AgentId) {
       const seenPickups = new Set<string>();
+      const seenDeathAftermaths = new Set<string>();
 
       nextSnapshot.pickups.forEach((pickup) => {
         seenPickups.add(pickup.id);
@@ -176,6 +185,27 @@ export function createVillageScene(deps: SceneDeps) {
         if (seenPickups.has(pickupId)) return;
         bundle.dot.destroy();
         this.pickupSprites.delete(pickupId);
+      });
+
+      nextSnapshot.deathAftermaths.forEach((aftermath) => {
+        seenDeathAftermaths.add(aftermath.id);
+        const point = worldToScreen(aftermath.position.x, aftermath.position.y);
+        let bundle = this.deathAftermathSprites.get(aftermath.id);
+
+        if (!bundle) {
+          bundle = this.createDeathAftermath(aftermath.agentName, point.x, point.y);
+          this.deathAftermathSprites.set(aftermath.id, bundle);
+        }
+
+        bundle.ember.setPosition(point.x, point.y + 3);
+        bundle.label.setPosition(point.x, point.y - 34).setText(`${aftermath.agentName} burned here`);
+      });
+
+      this.deathAftermathSprites.forEach((bundle, deathId) => {
+        if (seenDeathAftermaths.has(deathId)) return;
+        bundle.ember.destroy();
+        bundle.label.destroy();
+        this.deathAftermathSprites.delete(deathId);
       });
 
       nextSnapshot.agents.forEach((agent) => {
@@ -368,6 +398,63 @@ export function createVillageScene(deps: SceneDeps) {
 
       this.setAnimation(bundle, id, "idle");
       return bundle;
+    }
+
+    private createDeathAftermath(agentName: string, x: number, y: number): DeathAftermathBundle {
+      const ember = this.add.container(x, y + 3);
+      const body = this.add.ellipse(0, 8, 26, 12, 0x2f1d16, 0.88);
+      const flames = [
+        this.add.circle(-8, 0, 6, 0xff7a36, 0.95),
+        this.add.circle(0, -4, 8, 0xffb14d, 0.95),
+        this.add.circle(9, 1, 5, 0xff5f2f, 0.92),
+      ];
+      const smoke = [
+        this.add.circle(-4, -16, 5, 0x7d808b, 0.26),
+        this.add.circle(4, -22, 6, 0x8c8f99, 0.22),
+      ];
+
+      ember.add([body, ...flames, ...smoke]);
+
+      flames.forEach((flame, index) => {
+        this.tweens.add({
+          targets: flame,
+          y: flame.y - 6,
+          scaleX: 0.72,
+          scaleY: 1.28,
+          alpha: 0.5,
+          duration: 420 + index * 80,
+          yoyo: true,
+          repeat: -1,
+          ease: "Sine.InOut",
+        });
+      });
+
+      smoke.forEach((puff, index) => {
+        this.tweens.add({
+          targets: puff,
+          y: puff.y - 12,
+          x: puff.x + (index === 0 ? -4 : 5),
+          alpha: 0,
+          duration: 1500 + index * 240,
+          repeat: -1,
+          ease: "Sine.Out",
+          onRepeat: () => {
+            puff.y = -16 - index * 5;
+            puff.x = index === 0 ? -4 : 4;
+            puff.alpha = 0.26 - index * 0.04;
+          },
+        });
+      });
+
+      const label = this.add.text(x, y - 34, `${agentName} burned here`, {
+        fontFamily: "monospace",
+        fontSize: "10px",
+        color: "#7e2e1b",
+        backgroundColor: "rgba(255,244,236,0.88)",
+        padding: { x: 6, y: 3 },
+      }).setOrigin(0.5);
+
+      return { ember, flames, smoke, label };
     }
 
     private updateBubble(bundle: AgentSpriteBundle, line: string | null, isThought = false) {
